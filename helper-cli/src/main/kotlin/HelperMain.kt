@@ -34,6 +34,7 @@ import org.apache.logging.log4j.core.config.Configurator
 import org.ossreviewtoolkit.helper.commands.CreateAnalyzerResultCommand
 import org.ossreviewtoolkit.helper.commands.DownloadResultsFromPostgresCommand
 import org.ossreviewtoolkit.helper.commands.ExtractRepositoryConfigurationCommand
+import org.ossreviewtoolkit.helper.commands.ConvertSpdxToOrtCommand
 import org.ossreviewtoolkit.helper.commands.GenerateTimeoutErrorResolutionsCommand
 import org.ossreviewtoolkit.helper.commands.GetPackageLicensesCommand
 import org.ossreviewtoolkit.helper.commands.ImportCopyrightGarbageCommand
@@ -101,7 +102,8 @@ internal class HelperMain : CliktCommand(name = ORTH_NAME, epilog = "* denotes r
             SetLabelsCommand(),
             SubtractScanResultsCommand(),
             TransformResultCommand(),
-            VerifySourceArtifactCurationsCommand()
+            VerifySourceArtifactCurationsCommand(),
+            ConvertSpdxToOrtCommand()
         )
     }
 
