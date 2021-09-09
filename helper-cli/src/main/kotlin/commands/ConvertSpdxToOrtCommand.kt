@@ -139,16 +139,13 @@ private fun spdxToOrt(spdxDocument: SpdxDocument, skipScanResultsConversion: Boo
             val containedFiles = mutableListOf<SpdxFile>()
             for (spdxRelationship in packageContainsRelationships) {
                 val containedFile = filesBySpdxId.get(spdxRelationship.relatedSpdxElement)!!
+                containedFiles.add(containedFile)
                 val generatingRelationships =
                     relationshipsBySpdxId.getValue(containedFile.spdxId)
                         .filter { it.relationshipType == SpdxRelationship.Type.GENERATED_FROM }
 
-                if (generatingRelationships.isEmpty()) {
-                    containedFiles.add(containedFile)
-                } else {
                     for (generatingRelationship in generatingRelationships) {
                         containedFiles.add(filesBySpdxId.get(generatingRelationship.relatedSpdxElement)!!)
-                    }
                 }
             }
 
