@@ -21,6 +21,7 @@ package org.ossreviewtoolkit.helper.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.convert
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.file
@@ -61,10 +62,12 @@ internal class ConvertSpdxToOrtCommand : CliktCommand(
     ).convert { it.expandTilde() }
         .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
 
+    private val skipScanResultsConversion: Boolean by option("--skip-scan").flag()
+
     override fun run() {
         val spdxDocument = SpdxModelMapper.read<SpdxDocument>(spdxFile)
 
-        var ortResult = spdxToOrt(spdxDocument)
+        var ortResult = spdxToOrt(spdxDocument, skipScanResultsConversion)
 
         repositoryConfigurationFile?.let {
             ortResult = ortResult.replaceConfig(it.readValue())
@@ -77,7 +80,7 @@ internal class ConvertSpdxToOrtCommand : CliktCommand(
 /**
  * Convert SPDX Document from Yocto created by meta-doubleopen layer to an ORT Result file.
  */
-private fun spdxToOrt(spdxDocument: SpdxDocument): OrtResult {
+private fun spdxToOrt(spdxDocument: SpdxDocument, skipScanResultsConversion: Boolean): OrtResult {
     /* Store image from the SPDX as a project in the ORT Result. SPDX's documentDescribes should always include the root
      * package, so not-null assertion should be alright.
      */
@@ -156,7 +159,7 @@ private fun spdxToOrt(spdxDocument: SpdxDocument): OrtResult {
                 /* If concludedLicense in SPDX is NOASSERTION, add the scanner hits from licenseInfoInFiles to the ORT
                  * file. If concludedLicense is something else, add it.
                  */
-                val fileFindings = fileFindingsFromSpdxFile(containedFile)
+                val fileFindings = fileFindingsFromSpdxFile(containedFile, skipScanResultsConversion)
 
                 // Add license findings if not NONE.
                 fileFindings.licenseFinding?.let { licenseFindings.add(fileFindings.licenseFinding) }
@@ -227,7 +230,7 @@ private data class FileFindings(val licenseFinding: LicenseFinding?, val copyrig
 /**
  * Convert an [SpdxFile] to [FileFindings].
  */
-private fun fileFindingsFromSpdxFile(spdxFile: SpdxFile): FileFindings {
+private fun fileFindingsFromSpdxFile(spdxFile: SpdxFile, skipScanResultsConversion: Boolean): FileFindings {
     val SCANNERHIT = 100000
     val CONCLUSION = 200000
     /* If concludedLicense in SPDX is NOASSERTION, add the scanner hits from licenseInfoInFiles to the ORT
@@ -236,10 +239,20 @@ private fun fileFindingsFromSpdxFile(spdxFile: SpdxFile): FileFindings {
     val licenseFinding =
         if (spdxFile.licenseConcluded.contains(SpdxConstants.NOASSERTION) && spdxFile.licenseInfoInFiles.isNotEmpty()) {
             // LicenseInfoInFiles is a list of SPDX IDs. Join with AND to create an SPDX expression.
-            LicenseFinding(
-                "(" + spdxFile.licenseInfoInFiles.joinToString(separator = " AND ") + ")",
-                TextLocation(spdxFile.spdxId, SCANNERHIT)
-            )
+            if (skipScanResultsConversion) {
+                LicenseFinding(
+                    "(" + spdxFile.licenseInfoInFiles.joinToString(separator = " AND ") + ")",
+                    TextLocation(spdxFile.spdxId, SCANNERHIT)
+                )
+            } else {
+                LicenseFinding(
+                    "(" + spdxFile.licenseInfoInFiles.map { it ->
+                        val license = it.removePrefix("LicenseRef-")
+                        "LicenseRef-Scanner-$license"
+                    }.joinToString(separator = " AND ") + ")",
+                    TextLocation(spdxFile.spdxId, SCANNERHIT)
+                )
+            }
         } else if (spdxFile.licenseConcluded == SpdxConstants.NONE) {
             null
         } else {
