@@ -229,19 +229,24 @@ private fun fileFindingsFromSpdxFile(spdxFile: SpdxFile, skipScanResultsConversi
     val licenseFinding =
         if (spdxFile.licenseConcluded.contains(SpdxConstants.NOASSERTION) && spdxFile.licenseInfoInFiles.isNotEmpty()) {
             // LicenseInfoInFiles is a list of SPDX IDs. Join with AND to create an SPDX expression.
-            if (skipScanResultsConversion) {
-                LicenseFinding(
-                    "(" + spdxFile.licenseInfoInFiles.joinToString(separator = " AND ") + ")",
-                    TextLocation(spdxFile.spdxId, SCANNERHIT)
-                )
+            val licenseInfoInFiles = spdxFile.licenseInfoInFiles.filter { it != SpdxConstants.NOASSERTION }
+            if (licenseInfoInFiles.isNotEmpty()) {
+                if (skipScanResultsConversion) {
+                    LicenseFinding(
+                        "(" + licenseInfoInFiles.joinToString(separator = " AND ") + ")",
+                        TextLocation(spdxFile.spdxId, SCANNERHIT)
+                    )
+                } else {
+                    LicenseFinding(
+                        "(" + licenseInfoInFiles.map { it ->
+                            val license = it.removePrefix("LicenseRef-")
+                            "LicenseRef-Scanner-$license"
+                        }.joinToString(separator = " AND ") + ")",
+                        TextLocation(spdxFile.spdxId, SCANNERHIT)
+                    )
+                }
             } else {
-                LicenseFinding(
-                    "(" + spdxFile.licenseInfoInFiles.map { it ->
-                        val license = it.removePrefix("LicenseRef-")
-                        "LicenseRef-Scanner-$license"
-                    }.joinToString(separator = " AND ") + ")",
-                    TextLocation(spdxFile.spdxId, SCANNERHIT)
-                )
+                null
             }
         } else if (spdxFile.licenseConcluded == SpdxConstants.NONE) {
             null
