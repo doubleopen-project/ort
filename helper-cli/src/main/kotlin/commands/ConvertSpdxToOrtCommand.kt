@@ -112,65 +112,58 @@ private fun spdxToOrt(spdxDocument: SpdxDocument, skipScanResultsConversion: Boo
     val scanResults = sortedMapOf<Identifier, List<ScanResult>>()
     for (spdxPackage in spdxDocument.packages) {
         if (spdxPackage.spdxId !in spdxDocument.documentDescribes) {
-            val ortPackage = spdxPackageToOrtPackage(spdxPackage).toCuratedPackage()
-            packages.add(ortPackage)
 
             // Add package to the correct scope.
-            when {
-                spdxDocument.relationships.any { spdxRelationship ->
+            if (spdxDocument.relationships.any { spdxRelationship ->
                     (spdxRelationship.spdxElementId == spdxPackage.spdxId) &&
                             (spdxRelationship.relationshipType == SpdxRelationship.Type.PACKAGE_OF)
-                } -> {
-                    scopeDistributed.dependencies.add(ortPackage.pkg.toReference())
-                }
-                spdxPackage.spdxId.startsWith("SPDXRef-Recipe-") -> {
-                    scopeRecipes.dependencies.add(ortPackage.pkg.toReference())
-                }
-                else -> {
-                    scopeNotDistributed.dependencies.add(ortPackage.pkg.toReference())
-                }
-            }
+                }) {
+                val ortPackage = spdxPackageToOrtPackage(spdxPackage).toCuratedPackage()
+                packages.add(ortPackage)
+                scopeDistributed.dependencies.add(ortPackage.pkg.toReference())
 
-            // Get files contained by the package.
-            val packageContainsRelationships =
-                relationshipsBySpdxId.getValue(spdxPackage.spdxId)
-                    .filter { it.relationshipType == SpdxRelationship.Type.CONTAINS }
+                // Get files contained by the package.
+                val packageContainsRelationships =
+                    relationshipsBySpdxId.getValue(spdxPackage.spdxId)
+                        .filter { it.relationshipType == SpdxRelationship.Type.CONTAINS }
 
-            val containedFiles = mutableListOf<SpdxFile>()
-            for (spdxRelationship in packageContainsRelationships) {
-                val containedFile = filesBySpdxId.get(spdxRelationship.relatedSpdxElement)!!
-                containedFiles.add(containedFile)
-                val generatingRelationships =
-                    relationshipsBySpdxId.getValue(containedFile.spdxId)
-                        .filter { it.relationshipType == SpdxRelationship.Type.GENERATED_FROM }
+                val containedFiles = mutableListOf<SpdxFile>()
+                for (spdxRelationship in packageContainsRelationships) {
+                    val containedFile = filesBySpdxId.get(spdxRelationship.relatedSpdxElement)!!
+                    containedFiles.add(containedFile)
+                    val generatingRelationships =
+                        relationshipsBySpdxId.getValue(containedFile.spdxId)
+                            .filter { it.relationshipType == SpdxRelationship.Type.GENERATED_FROM }
 
                     for (generatingRelationship in generatingRelationships) {
                         containedFiles.add(filesBySpdxId.get(generatingRelationship.relatedSpdxElement)!!)
+                    }
                 }
+
+                // Add license and copyright findings for the contained files.
+                val copyrightFindings = sortedSetOf<CopyrightFinding>()
+                val licenseFindings = sortedSetOf<LicenseFinding>()
+                for (containedFile in containedFiles) {
+                    /* If concludedLicense in SPDX is NOASSERTION, add the scanner hits from licenseInfoInFiles to the ORT
+                     * file. If concludedLicense is something else, add it.
+                     */
+                    val fileFindings = fileFindingsFromSpdxFile(containedFile, skipScanResultsConversion)
+
+                    // Add license findings if not NONE.
+                    fileFindings.licenseFinding?.let { licenseFindings.add(fileFindings.licenseFinding) }
+
+                    // Add copyrights if it's not NOASSERTION.
+                    fileFindings.copyrightFinding?.let { copyrightFindings.add(it) }
+                }
+
+                val scanSummary =
+                    ScanSummary(Instant.EPOCH, Instant.EPOCH, "", licenseFindings, copyrightFindings)
+                val scanResult = ScanResult(UnknownProvenance, ScannerDetails.EMPTY, scanSummary)
+                scanResults[ortPackage.pkg.id] = listOf(scanResult)
             }
-
-            // Add license and copyright findings for the contained files.
-            val copyrightFindings = sortedSetOf<CopyrightFinding>()
-            val licenseFindings = sortedSetOf<LicenseFinding>()
-            for (containedFile in containedFiles) {
-                /* If concludedLicense in SPDX is NOASSERTION, add the scanner hits from licenseInfoInFiles to the ORT
-                 * file. If concludedLicense is something else, add it.
-                 */
-                val fileFindings = fileFindingsFromSpdxFile(containedFile, skipScanResultsConversion)
-
-                // Add license findings if not NONE.
-                fileFindings.licenseFinding?.let { licenseFindings.add(fileFindings.licenseFinding) }
-
-                // Add copyrights if it's not NOASSERTION.
-                fileFindings.copyrightFinding?.let { copyrightFindings.add(it) }
-            }
-
-            val scanSummary =
-                ScanSummary(Instant.EPOCH, Instant.EPOCH,"", licenseFindings, copyrightFindings)
-            val scanResult = ScanResult(UnknownProvenance, ScannerDetails.EMPTY, scanSummary)
-            scanResults[ortPackage.pkg.id] = listOf(scanResult)
         }
     }
+
     val scopes = sortedSetOf<Scope>()
     scopes.add(scopeDistributed)
     scopes.add(scopeNotDistributed)
