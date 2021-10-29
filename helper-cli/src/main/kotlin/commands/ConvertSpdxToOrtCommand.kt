@@ -35,9 +35,12 @@ import org.ossreviewtoolkit.spdx.model.SpdxDocument
 import org.ossreviewtoolkit.spdx.model.SpdxFile
 import org.ossreviewtoolkit.spdx.model.SpdxPackage
 import org.ossreviewtoolkit.spdx.model.SpdxRelationship
+import org.ossreviewtoolkit.spdx.toSpdx
 import org.ossreviewtoolkit.utils.Environment
 import org.ossreviewtoolkit.utils.expandTilde
 import java.time.Instant
+import java.util.*
+import kotlin.collections.HashMap
 
 internal class ConvertSpdxToOrtCommand : CliktCommand(
     help = "Convert SPDX Document to ORT result file."
@@ -200,10 +203,11 @@ private fun spdxPackageToOrtPackage(spdxPackage: SpdxPackage): Package {
     } else {
         Identifier("Yocto", "", spdxPackage.name, spdxPackage.versionInfo)
     }
+    val declaredLicenses = spdxPackage.licenseDeclared.toSpdx().licenses()
 
     return Package(
         id = id,
-        declaredLicenses = sortedSetOf(),
+        declaredLicenses = declaredLicenses.toSortedSet(),
         binaryArtifact = RemoteArtifact.EMPTY,
         description = spdxPackage.description,
         homepageUrl = spdxPackage.homepage,
