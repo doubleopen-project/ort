@@ -21,8 +21,8 @@
 [9]: https://github.com/oss-review-toolkit/ort/actions/workflows/static-analysis.yml/badge.svg?branch=master
 [10]: https://jitpack.io/v/oss-review-toolkit/ort.svg
 [11]: https://jitpack.io/#oss-review-toolkit/ort
-[12]: https://codecov.io/gh/oss-review-toolkit/ort/branch/master/graph/badge.svg
-[13]: https://codecov.io/gh/oss-review-toolkit/ort/
+[12]: https://codecov.io/gh/oss-review-toolkit/ort/branch/master/graph/badge.svg?token=QD2tCSUTVN
+[13]: https://app.codecov.io/gh/oss-review-toolkit/ort
 [14]: https://badgen.net/https/api.tickgit.com/badgen/github.com/oss-review-toolkit/ort
 [15]: https://www.tickgit.com/browse?repo=github.com/oss-review-toolkit/ort
 [16]: https://img.shields.io/lgtm/alerts/g/oss-review-toolkit/ort.svg?logo=lgtm&logoWidth=18
@@ -316,39 +316,67 @@ JSON, see `-f`) format to a file named `analyzer-result.yml` in the specified ou
 exactly documents the status quo of all package-related metadata. It can be further processed or manually edited before
 passing it to one of the other tools.
 
-Currently, the following package managers are supported:
+Currently, the following package managers (grouped by the programming language they are most commonly used with) are
+supported:
 
-* [Bower](http://bower.io/) (JavaScript)
-* [Bundler](http://bundler.io/) (Ruby)
-* [Cargo](https://doc.rust-lang.org/cargo/) (Rust)
-* [Carthage](https://github.com/Carthage/Carthage) (iOS / Cocoa)
-* [CocoaPods](https://github.com/CocoaPods/CocoaPods) (iOS / Cocoa, with currently some
-  [limitations](https://github.com/oss-review-toolkit/ort/issues/4188))  
-* [Composer](https://getcomposer.org/) (PHP)
-* [Conan](https://conan.io/) (C / C++, *experimental* as the VCS locations often times do not contain the actual source
-  code, see [issue #2037](https://github.com/oss-review-toolkit/ort/issues/2037))
-* [dep](https://golang.github.io/dep/) (Go)
-* [DotNet](https://docs.microsoft.com/en-us/dotnet/core/tools/) (.NET, with currently some
-  [limitations](https://github.com/oss-review-toolkit/ort/pull/1303#issue-253860146))
-* [Glide](https://github.com/Masterminds/glide) (Go)
-* [Godep](https://github.com/tools/godep) (Go)
-* [GoMod](https://github.com/golang/go/wiki/Modules) (Go)
-* [Gradle](https://gradle.org/) (Java)
-* [Maven](http://maven.apache.org/) (Java)
-* [NPM](https://www.npmjs.com/) (Node.js)
-* [NuGet](https://www.nuget.org/) (.NET, with currently some
-  [limitations](https://github.com/oss-review-toolkit/ort/pull/1303#issue-253860146))
-* [PIP](https://pip.pypa.io/) (Python, currently [limited](https://github.com/oss-review-toolkit/ort/issues/3671) to
-  projects that are compatible with Python 2.7 or Python 3.6)
-* [Pipenv](https://pipenv.readthedocs.io/) (Python, currently [limited](https://github.com/oss-review-toolkit/ort/issues/3671)
-  to projects that are compatible with Python 2.7 or Python 3.6)
-* [Pub](https://pub.dev/) (Dart / Flutter)
-* [SBT](http://www.scala-sbt.org/) (Scala)
-* [SPDX](https://spdx.dev/specifications/) (SPDX documents used to describe
-  [projects](./analyzer/src/funTest/assets/projects/synthetic/spdx/project/project.spdx.yml) or
-  [packages](./analyzer/src/funTest/assets/projects/synthetic/spdx/package/libs/curl/package.spdx.yml))
-* [Stack](http://haskellstack.org/) (Haskell)
-* [Yarn](https://yarnpkg.com/) (Node.js)
+* C / C++
+  * [Conan](https://conan.io/) (limitations:
+  [receipe vs. source repository](https://github.com/oss-review-toolkit/ort/issues/2037))
+  * Also see: [SPDX documents](#analyzer-for-spdx-documents)
+* Dart / Flutter
+  * [Pub](https://pub.dev/)
+* Go
+  * [dep](https://golang.github.io/dep/)
+  * [Glide](https://github.com/Masterminds/glide)
+  * [Godep](https://github.com/tools/godep)
+  * [GoMod](https://github.com/golang/go/wiki/Modules) (limitations:
+  [no `replace` directive](https://github.com/oss-review-toolkit/ort/issues/4445))
+* Haskell
+  * [Stack](https://haskellstack.org/)
+* Java
+  * [Gradle](https://gradle.org/)
+  * [Maven](https://maven.apache.org/) (limitations:
+  [default profile only](https://github.com/oss-review-toolkit/ort/issues/1774))
+* JavaScript / Node.js
+  * [Bower](https://bower.io/)
+  * [NPM](https://www.npmjs.com/) (limitations:
+  [no scope-specific registries](https://github.com/oss-review-toolkit/ort/issues/3741),
+  [no peer dependencies](https://github.com/oss-review-toolkit/ort/issues/95))
+  * [Yarn](https://yarnpkg.com/) (limitations:
+  [no Yarn 2 / 3 support](https://github.com/oss-review-toolkit/ort/issues/2283))
+* .NET
+  * [DotNet](https://docs.microsoft.com/en-us/dotnet/core/tools/) (limitations:
+  [no floating versions / ranges](https://github.com/oss-review-toolkit/ort/pull/1303#issue-253860146),
+  [no target framework](https://github.com/oss-review-toolkit/ort/issues/4083))
+  * [NuGet](https://www.nuget.org/) (limitations:
+  [no floating versions / ranges](https://github.com/oss-review-toolkit/ort/pull/1303#issue-253860146),
+  [no target framework](https://github.com/oss-review-toolkit/ort/issues/4083))
+* Objective-C / Swift
+  * [Carthage](https://github.com/Carthage/Carthage) (limitation:
+  [no `cartfile.private`](https://github.com/oss-review-toolkit/ort/issues/3774))
+  * [CocoaPods](https://github.com/CocoaPods/CocoaPods) (limitations:
+  [no custom source repositories](https://github.com/oss-review-toolkit/ort/issues/4188))
+* PHP
+  * [Composer](https://getcomposer.org/)
+* Python
+  * [PIP](https://pip.pypa.io/) (limitations:
+  [Python 2.7 or 3.6 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
+  * [Pipenv](https://pipenv.readthedocs.io/) (limitations:
+  [Python 2.7 or 3.6 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
+* Ruby
+  * [Bundler](https://bundler.io/) (limitations:
+  [restricted to the version available on the host](https://github.com/oss-review-toolkit/ort/issues/1308))
+* Rust
+  * [Cargo](https://doc.rust-lang.org/cargo/)
+* Scala
+  * [SBT](https://www.scala-sbt.org/)
+
+<a name="analyzer-for-spdx-documents"></a>
+
+If another package manager that is not part of the list above is used (or no package manager at all), the generic
+fallback to [SPDX documents](https://spdx.dev/specifications/) can be leveraged to describe
+[projects](./analyzer/src/funTest/assets/projects/synthetic/spdx/project/project.spdx.yml) or
+[packages](./analyzer/src/funTest/assets/projects/synthetic/spdx/package/libs/curl/package.spdx.yml).
 
 <a name="downloader">&nbsp;</a>
 
@@ -586,6 +614,14 @@ ort {
 
 To enable this provider, pass `-a NexusIQ` on the command line.
 
+## OSS Index
+
+This vulnerability provider does not require any further configuration as it uses the public service at
+https://ossindex.sonatype.org/. Before using this provider, please ensure to comply with its
+[Terms of Service](https://ossindex.sonatype.org/tos).
+
+To enable this provider, pass `-a OssIndex` on the command line.
+
 ## VulnerableCode
 
 This provider obtains information about security vulnerabilities from a
@@ -621,16 +657,25 @@ following formats are supported (reporter names are case-insensitive):
 
 * [AsciiDoc Template](docs/reporters/AsciiDocTemplateReporter.md) (`-f AsciiDocTemplate`)
   * Content customizable with [Apache Freemarker](https://freemarker.apache.org/) templates and [AsciiDoc](https://asciidoc.org/)
-  * Supports all AsciiDoc backends
   * PDF style customizable with Asciidoctor [PDF themes](https://github.com/asciidoctor/asciidoctor-pdf/blob/master/docs/theming-guide.adoc)
+  * Supports multiple AsciiDoc backends:
+    * PDF (`-f PdfTemplate`)
+    * HTML (`-f HtmlTemplate`)
+    * XHTML (`-f XHtmlTemplate`)
+    * DocBook (`-f DocBookTemplate`)
+    * Man page (`-f ManPageTemplate`)
+    * AsciiDoc (`-f AdocTemplate`): Does not convert the created AsciiDoc files but writes the generated files as
+      reports.
+* [ctrlX AUTOMATION](https://ctrlx-automation.com/) [FOSS information](https://github.com/boschrexroth/json-schema/tree/master/ctrlx-automation/ctrlx-core/apps/fossinfo)
 * [CycloneDX](https://cyclonedx.org/) BOM (`-f CycloneDx`)
 * [Excel](https://products.office.com/excel) sheet (`-f Excel`)
 * [GitLabLicenseModel](https://docs.gitlab.com/ee/ci/pipelines/job_artifacts.html#artifactsreportslicense_scanning-ultimate) (`-f GitLabLicenseModel`)
   * A nice tutorial video has been [published](https://youtu.be/dNmH_kYJ34g) by GitLab engineer @mokhan.
-* [NOTICE](http://www.apache.org/dev/licensing-howto.html) file in two variants
+* [NOTICE](https://infra.apache.org/licensing-howto.html) file in two variants
   * List license texts and copyrights by package (`-f NoticeTemplate`)
   * Summarize all license texts and copyrights (`-f NoticeTemplate -O NoticeTemplate=template.id=summary`)
   * Customizable with [Apache Freemarker](https://freemarker.apache.org/) templates
+* Opossum input that can be visualized and edited in the [OpossumUI](https://github.com/opossum-tool/opossumUI)  (`-f Opossum`)
 * [SPDX Document](https://spdx.dev/specifications/), version 2.2 (`-f SpdxDocument`)
 * Static HTML (`-f StaticHtml`)
 * Web App (`-f WebApp`)

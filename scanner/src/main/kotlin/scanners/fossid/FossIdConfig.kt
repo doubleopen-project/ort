@@ -22,8 +22,8 @@ package org.ossreviewtoolkit.scanner.scanners.fossid
 import org.ossreviewtoolkit.clients.fossid.FossIdRestService
 import org.ossreviewtoolkit.clients.fossid.FossIdServiceWithVersion
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
-import org.ossreviewtoolkit.utils.OkHttpClientHelper
-import org.ossreviewtoolkit.utils.log
+import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.log
 
 /**
  * A data class that holds the configuration options supported by the [FossId] scanner. An instance of this class is
@@ -44,7 +44,7 @@ import org.ossreviewtoolkit.utils.log
  * deltaScans is set and no scan exist yet, an initial scan called "origin" scan will be created.
  * * **"deltaScanLimit":** This setting can be used to limit the number of delta scans to keep for a given repository.
  * So if another delta scan is created, older delta scans are deleted until this number is reached. If unspecified, no
- * limit is enforced on the number of delta scans to keeo. This property is evaluated only if *deltaScans* is enabled.
+ * limit is enforced on the number of delta scans to keep. This property is evaluated only if *deltaScans* is enabled.
  *
  * Naming conventions options. If they are not set, default naming convention are used.
  * * **"namingProjectPattern":** A pattern for project names when projects are created on the FossID instance. Contains

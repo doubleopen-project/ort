@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +44,7 @@ import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.analyzer.parseAuthorString
 import org.ossreviewtoolkit.downloader.VcsHost
 import org.ossreviewtoolkit.downloader.VersionControlSystem
+import org.ossreviewtoolkit.model.EMPTY_JSON_NODE
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.OrtIssue
 import org.ossreviewtoolkit.model.Package
@@ -57,36 +59,35 @@ import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.yamlMapper
-import org.ossreviewtoolkit.utils.CommandLineTool
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.OkHttpClientHelper
-import org.ossreviewtoolkit.utils.Os
-import org.ossreviewtoolkit.utils.ProcessCapture
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.getPathFromEnvironment
-import org.ossreviewtoolkit.utils.isSymbolicLink
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.ortToolsDirectory
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.textValueOrEmpty
-import org.ossreviewtoolkit.utils.unpack
+import org.ossreviewtoolkit.utils.common.CommandLineTool
+import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.ProcessCapture
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.isSymbolicLink
+import org.ossreviewtoolkit.utils.common.textValueOrEmpty
+import org.ossreviewtoolkit.utils.common.unpack
+import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.ortToolsDirectory
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 private const val GRADLE_VERSION = "5.6.4"
+private const val PUBSPEC_YAML = "pubspec.yaml"
 private const val PUB_LOCK_FILE = "pubspec.lock"
 
 private val flutterCommand = if (Os.isWindows) "flutter.bat" else "flutter"
-private val pubCommand = if (Os.isWindows) "pub.bat" else "pub"
+private val dartCommand = if (Os.isWindows) "dart.bat" else "dart"
 
-private val flutterVersion = Os.env["FLUTTER_VERSION"] ?: "v1.12.13+hotfix.9-stable"
+private val flutterVersion = Os.env["FLUTTER_VERSION"] ?: "2.2.3-stable"
 private val flutterInstallDir = "$ortToolsDirectory/flutter-$flutterVersion"
 
 private val flutterHome by lazy {
-    getPathFromEnvironment(flutterCommand)?.parentFile?.parentFile
+    Os.getPathFromEnvironment(flutterCommand)?.parentFile?.parentFile
         ?: File(Os.env["FLUTTER_HOME"] ?: "$flutterInstallDir/flutter")
 }
 
 private val flutterAbsolutePath = flutterHome.resolve("bin")
-private val pubAbsolutePath = flutterAbsolutePath.resolve("cache/dart-sdk/bin")
 
 /**
  * The [Pub](https://pub.dev/) package manager for Dart / Flutter.
@@ -102,7 +103,7 @@ class Pub(
     repoConfig: RepositoryConfiguration
 ) : PackageManager(name, analysisRoot, analyzerConfig, repoConfig), CommandLineTool {
     class Factory : AbstractPackageManagerFactory<Pub>("Pub") {
-        override val globsForDefinitionFiles = listOf("pubspec.yaml")
+        override val globsForDefinitionFiles = listOf(PUBSPEC_YAML)
 
         override fun create(
             analysisRoot: File,
@@ -118,11 +119,12 @@ class Pub(
      */
     private class PubCacheReader {
         private val pubCacheRoot by lazy {
-            // TODO: Add support for the PUB_CACHE environment variable.
+            Os.env["PUB_CACHE"]?.let { return@lazy File(it) }
+
             if (Os.isWindows) {
-                File(Os.env["APPDATA"], "Pub/Cache")
+                File(Os.env["LOCALAPPDATA"], "Pub/Cache")
             } else {
-                Os.userHomeDirectory.resolve(".pub-cache/")
+                Os.userHomeDirectory.resolve(".pub-cache")
             }
         }
 
@@ -192,9 +194,9 @@ class Pub(
     private val processedPackages = mutableListOf<String>()
     private val reader = PubCacheReader()
 
-    override fun transformVersion(output: String) = output.removePrefix("Pub ")
+    override fun transformVersion(output: String) = output.removePrefix("Dart SDK version: ").substringBefore(' ')
 
-    override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[2.2,)")
+    override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[2.10,)")
 
     override fun beforeResolution(definitionFiles: List<File>) {
         if (flutterAbsolutePath.resolve(flutterCommand).isFile) {
@@ -248,7 +250,7 @@ class Pub(
             .requireSuccess()
     }
 
-    override fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult> {
+    override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val workingDir = definitionFile.parentFile
         val manifest = yamlMapper.readTree(definitionFile)
 
@@ -269,14 +271,14 @@ class Pub(
 
             log.info { "Successfully read lockfile." }
 
-            val parsePackagesResult = parseInstalledPackages(lockFile)
+            val parsePackagesResult = parseInstalledPackages(lockFile, labels)
             packages += parsePackagesResult.packages
             issues += parsePackagesResult.issues
 
             log.info { "Successfully parsed installed packages." }
 
-            scopes += parseScope("dependencies", manifest, lockFile, parsePackagesResult.packages)
-            scopes += parseScope("dev_dependencies", manifest, lockFile, parsePackagesResult.packages)
+            scopes += parseScope("dependencies", manifest, lockFile, parsePackagesResult.packages, labels)
+            scopes += parseScope("dev_dependencies", manifest, lockFile, parsePackagesResult.packages, labels)
         }
 
         log.info { "Reading ${definitionFile.name} file in $workingDir." }
@@ -290,14 +292,15 @@ class Pub(
         scopeName: String,
         manifest: JsonNode,
         lockFile: JsonNode,
-        packages: Map<Identifier, Package>
+        packages: Map<Identifier, Package>,
+        labels: Map<String, String>
     ): Scope {
         val packageName = manifest["name"].textValue()
 
         log.info { "Parsing scope '$scopeName' for package '$packageName'." }
 
         val requiredPackages = manifest[scopeName]?.fieldNames()?.asSequence()?.toList() ?: listOf<String>()
-        val dependencies = buildDependencyTree(requiredPackages, manifest, lockFile, packages)
+        val dependencies = buildDependencyTree(requiredPackages, manifest, lockFile, packages, labels)
         return Scope(scopeName, dependencies)
     }
 
@@ -305,7 +308,8 @@ class Pub(
         dependencies: List<String>,
         manifest: JsonNode,
         lockFile: JsonNode,
-        packages: Map<Identifier, Package>
+        packages: Map<Identifier, Package>,
+        labels: Map<String, String>
     ): SortedSet<PackageReference> {
         val packageReferences = mutableSetOf<PackageReference>()
         val nameOfCurrentPackage = manifest["name"].textValue()
@@ -343,13 +347,13 @@ class Pub(
                     dependencyYamlFile["dependencies"]?.fieldNames()?.asSequence()?.toList().orEmpty()
 
                 val transitiveDependencies =
-                    buildDependencyTree(requiredPackages, dependencyYamlFile, lockFile, packages)
+                    buildDependencyTree(requiredPackages, dependencyYamlFile, lockFile, packages, labels)
 
                 // If the project contains Flutter, we need to trigger the analyzer for Gradle and CocoaPod
                 // dependencies for each pub dependency manually, as the analyzer will only scan the
-                // projectRoot, but not the packages in the .pub-cache folder.
+                // projectRoot, but not the packages in the ".pub-cache" directory.
                 if (containsFlutter) {
-                    scanAndroidPackages(pkgInfoFromLockFile).forEach { resultAndroid ->
+                    scanAndroidPackages(pkgInfoFromLockFile, labels).forEach { resultAndroid ->
                         packageReferences += packageInfo.toReference(
                             dependencies = resultAndroid.project.scopes
                                 .find { it.name == "releaseCompileClasspath" }
@@ -380,7 +384,7 @@ class Pub(
 
     private val analyzerResultCacheAndroid = mutableMapOf<String, List<ProjectAnalyzerResult>>()
 
-    private fun scanAndroidPackages(packageInfo: JsonNode): List<ProjectAnalyzerResult> {
+    private fun scanAndroidPackages(packageInfo: JsonNode, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val packageName = packageInfo["description"]["name"].textValueOrEmpty()
 
         // We cannot find packages without a valid name.
@@ -398,7 +402,7 @@ class Pub(
         return analyzerResultCacheAndroid.getOrPut(packageName) {
             // Use the latest 5.x Gradle version as Flutter / its Android Gradle plugin does not support Gradle 6 yet.
             Gradle("Gradle", androidDir, analyzerConfig, repoConfig, GRADLE_VERSION)
-                .resolveDependencies(listOf(packageFile)).run {
+                .resolveDependencies(listOf(packageFile), labels).run {
                     projectResults.getValue(packageFile).map { result ->
                         val project = result.project.withResolvedScopes(dependencyGraph)
                         result.copy(project = project, packages = sharedPackages.toSortedSet())
@@ -458,7 +462,7 @@ class Pub(
         )
     }
 
-    private fun parseInstalledPackages(lockFile: JsonNode): ParsePackagesResult {
+    private fun parseInstalledPackages(lockFile: JsonNode, labels: Map<String, String>): ParsePackagesResult {
         log.info { "Parsing installed Pub packages..." }
 
         val packages = mutableMapOf<Identifier, Package>()
@@ -540,7 +544,7 @@ class Pub(
                     val packageVersion = pkgInfoFromLockFile["version"].textValueOrEmpty()
                     issues += createAndLogIssue(
                         source = managerName,
-                        message = "Failed to parse pubspec.yaml for package $packageName:$packageVersion: " +
+                        message = "Failed to parse $PUBSPEC_YAML for package $packageName:$packageVersion: " +
                                 e.collectMessagesAsString()
                     )
                 }
@@ -549,11 +553,11 @@ class Pub(
 
         // If the project contains Flutter, we need to trigger the analyzer for Gradle and CocoaPod dependencies for
         // each Pub dependency manually, as the analyzer will only analyze the projectRoot, but not the packages in
-        // the .pub-cache folder.
+        // the ".pub-cache" directory.
         if (containsFlutter) {
             lockFile["packages"]?.forEach { pkgInfoFromLockFile ->
                 // As this package contains flutter, trigger Gradle manually for it.
-                scanAndroidPackages(pkgInfoFromLockFile).forEach { result ->
+                scanAndroidPackages(pkgInfoFromLockFile, labels).forEach { result ->
                     result.collectPackagesByScope("releaseCompileClasspath").forEach { pkg ->
                         packages[pkg.id] = pkg
                     }
@@ -576,19 +580,37 @@ class Pub(
     }
 
     private fun readPackageInfoFromCache(packageInfo: JsonNode): JsonNode {
-        val definitionFile = reader.findFile(packageInfo, "pubspec.yaml")
+        val definitionFile = reader.findFile(packageInfo, PUBSPEC_YAML)
+        if (definitionFile == null) {
+            createAndLogIssue(
+                source = managerName,
+                message = "Could not find '$PUBSPEC_YAML' for '${packageInfo["name"].textValueOrEmpty()}'.",
+                severity = Severity.WARNING
+            )
+
+            return EMPTY_JSON_NODE
+        }
+
         return yamlMapper.readTree(definitionFile)
     }
 
+    override fun getVersion(workingDir: File?): String {
+        val result = ProcessCapture(workingDir, command(workingDir), getVersionArguments()).requireSuccess()
+
+        return transformVersion(result.stderr)
+    }
+
     override fun command(workingDir: File?): String =
-        if (pubAbsolutePath.isDirectory) "$pubAbsolutePath${File.separator}$pubCommand" else pubCommand
+        if (flutterAbsolutePath.isDirectory) "$flutterAbsolutePath${File.separator}$dartCommand" else dartCommand
+
+    private fun commandPub(): String = "${command()} pub"
 
     private fun commandFlutter(): String =
         if (flutterAbsolutePath.isDirectory) "$flutterAbsolutePath${File.separator}$flutterCommand packages"
         else "$flutterCommand packages"
 
     override fun run(workingDir: File?, vararg args: String): ProcessCapture {
-        var result = ProcessCapture(workingDir, *command(workingDir).split(' ').toTypedArray(), *args)
+        var result = ProcessCapture(workingDir, *commandPub().split(' ').toTypedArray(), *args)
         if (result.isError) {
             // If Pub fails with the message that Flutter should be used instead, fall back to using Flutter.
             if (result.errorMessage.contains("Flutter users should run `flutter")) {

@@ -56,19 +56,19 @@ import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.config.createFileArchiver
 import org.ossreviewtoolkit.model.createAndLogIssue
+import org.ossreviewtoolkit.scanner.storages.FileBasedStorage
 import org.ossreviewtoolkit.scanner.storages.PostgresStorage
-import org.ossreviewtoolkit.utils.CommandLineTool
-import org.ossreviewtoolkit.utils.Environment
-import org.ossreviewtoolkit.utils.Os
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.createOrtTempDir
-import org.ossreviewtoolkit.utils.fileSystemEncode
-import org.ossreviewtoolkit.utils.getPathFromEnvironment
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.perf
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.safeMkdirs
-import org.ossreviewtoolkit.utils.showStackTrace
+import org.ossreviewtoolkit.utils.common.CommandLineTool
+import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.fileSystemEncode
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.safeMkdirs
+import org.ossreviewtoolkit.utils.core.Environment
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.perf
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 /**
  * Abstraction for a [Scanner] that operates locally. Scan results can be stored in a [ScanResultsStorage].
@@ -115,7 +115,7 @@ abstract class LocalScanner(
     private val scannerDir by lazy {
         val scannerExe = command()
 
-        getPathFromEnvironment(scannerExe)?.parentFile?.takeIf {
+        Os.getPathFromEnvironment(scannerExe)?.parentFile?.takeIf {
             getVersion(it) == expectedVersion
         } ?: run {
             if (scannerExe.isNotEmpty()) {
@@ -136,7 +136,7 @@ abstract class LocalScanner(
                 }
 
                 log.perf {
-                    "Bootstrapped scanner '$scannerName' version $expectedVersion in ${duration.inWholeMilliseconds}ms."
+                    "Bootstrapped scanner '$scannerName' version $expectedVersion in $duration."
                 }
 
                 bootstrapDirectory
@@ -186,10 +186,10 @@ abstract class LocalScanner(
      * Return a [ScannerCriteria] object to be used when looking up existing scan results from a [ScanResultsStorage].
      * Per default, the properties of this object are initialized to match this scanner implementation. It is,
      * however, possible to override these defaults from the configuration, in the [ScannerConfiguration.options]
-     * property: Use properties of the form _scannerName.criteria.property_, where _scannerName_ is the name of
+     * property: Use properties of the form _scannerName.property_, where _scannerName_ is the name of
      * the scanner the configuration applies to, and _property_ is the name of a property of the [ScannerCriteria]
      * class. For instance, to specify that a specific minimum version of ScanCode is allowed, set this property:
-     * `options.ScanCode.criteria.minScannerVersion=3.0.2`.
+     * `options.ScanCode.minVersion=3.0.2`.
      */
     open fun getScannerCriteria(): ScannerCriteria {
         val options = scannerConfig.options?.get(scannerName).orEmpty()
@@ -200,8 +200,9 @@ abstract class LocalScanner(
     }
 
     override suspend fun scanPackages(
-        packages: Collection<Package>,
-        outputDirectory: File
+        packages: Set<Package>,
+        outputDirectory: File,
+        labels: Map<String, String>
     ): Map<Package, List<ScanResult>> {
         val scannerCriteria = getScannerCriteria()
 
@@ -400,8 +401,7 @@ abstract class LocalScanner(
         }
 
         log.perf {
-            "Scanned source code of '${pkg.id.toCoordinates()}' with ${javaClass.simpleName} in " +
-                    "${scanDuration.inWholeMilliseconds}ms."
+            "Scanned source code of '${pkg.id.toCoordinates()}' with ${javaClass.simpleName} in $scanDuration."
         }
 
         val scanResult = ScanResult(provenance, scannerDetails, scanSummary)
@@ -428,7 +428,7 @@ abstract class LocalScanner(
 
         val duration = measureTime { archiver.archive(directory, provenance) }
 
-        log.perf { "Archived files for '${id.toCoordinates()}' in ${duration.inWholeMilliseconds}ms." }
+        log.perf { "Archived files for '${id.toCoordinates()}' in $duration." }
     }
 
     /**
@@ -533,11 +533,13 @@ abstract class LocalScanner(
      * [OrtResult] produced by this scanner.
      *
      * The time interval between a failing read from storage and the resulting scan with the following store operation
-     * can be relatively large. Thus this [LocalScanner] is prone to adding duplicate scan results if multiple instances
-     * of the scanner run in parallel. In particular the [PostgresStorage] allows adding duplicate tuples
-     * (identifier, provenance, scanner details) which should be made unique.
+     * can be relatively large. Thus, this [LocalScanner] is prone to adding duplicate scan results if multiple
+     * instances of the scanner run in parallel and the storage backends do not prevent adding duplicates. In particular
+     * the [FileBasedStorage] and [PostgresStorage] used to allow adding duplicate tuples (identifier, provenance,
+     * scanner details).
      *
-     * TODO: Implement a solution that prevents duplicate scan results in the storages.
+     * Note that both storages implementations were updated to prevent adding duplicates, but this function is kept for
+     * storages that were created before the fix was implemented.
      */
     private fun List<ScanResult>.deduplicateScanResults(): List<ScanResult> {
         // Use vcsInfo and sourceArtifact instead of provenance in order to ignore the download time and original VCS

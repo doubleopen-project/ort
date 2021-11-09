@@ -45,20 +45,20 @@ import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.orEmpty
 import org.ossreviewtoolkit.model.utils.toPurl
-import org.ossreviewtoolkit.spdx.SpdxConstants
-import org.ossreviewtoolkit.spdx.SpdxExpression
-import org.ossreviewtoolkit.spdx.SpdxModelMapper
-import org.ossreviewtoolkit.spdx.model.SpdxDocument
-import org.ossreviewtoolkit.spdx.model.SpdxExternalDocumentReference
-import org.ossreviewtoolkit.spdx.model.SpdxExternalReference
-import org.ossreviewtoolkit.spdx.model.SpdxPackage
-import org.ossreviewtoolkit.spdx.model.SpdxRelationship
-import org.ossreviewtoolkit.spdx.toSpdx
-import org.ossreviewtoolkit.utils.OkHttpClientHelper
-import org.ossreviewtoolkit.utils.createOrtTempDir
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.withoutPrefix
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.withoutPrefix
+import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.spdx.SpdxModelMapper
+import org.ossreviewtoolkit.utils.spdx.model.SpdxDocument
+import org.ossreviewtoolkit.utils.spdx.model.SpdxExternalDocumentReference
+import org.ossreviewtoolkit.utils.spdx.model.SpdxExternalReference
+import org.ossreviewtoolkit.utils.spdx.model.SpdxPackage
+import org.ossreviewtoolkit.utils.spdx.model.SpdxRelationship
+import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 private const val MANAGER_NAME = "SpdxDocumentFile"
 private const val DEFAULT_SCOPE_NAME = "default"
@@ -252,15 +252,6 @@ private fun SpdxPackage.locateExternalReference(type: SpdxExternalReference.Type
     externalRefs.find { it.referenceType == type }?.referenceLocator
 
 /**
- * Return the organization from an "originator", "supplier", or "annotator" string, or null if no organization is
- * specified.
- */
-private fun String.extractOrganization(): String? =
-    lineSequence().mapNotNull { line ->
-        line.withoutPrefix(SpdxConstants.ORGANIZATION)
-    }.firstOrNull()
-
-/**
  * Return whether the string has the format of an [SpdxExternalDocumentReference], with or without an additional
  * package id.
  */
@@ -270,6 +261,25 @@ private fun String.isExternalDocumentReferenceId(): Boolean = startsWith(SpdxCon
  * Map a "not preset" SPDX value, i.e. NONE or NOASSERTION, to an empty string.
  */
 private fun String.mapNotPresentToEmpty(): String = takeUnless { SpdxConstants.isNotPresent(it) }.orEmpty()
+
+/**
+ * Wrap any "present" SPDX value in a sorted set, or return an empty sorted set otherwise.
+ */
+private fun String?.wrapPresentInSortedSet(): SortedSet<String> {
+    if (SpdxConstants.isPresent(this)) {
+        withoutPrefix(SpdxConstants.PERSON)?.let { persons ->
+            // In case of a person, allow a comma-separated list of persons.
+            return persons.split(',').mapTo(sortedSetOf()) { it.trim() }
+        }
+
+        // Do not split an organization like "Acme, Inc." by comma.
+        withoutPrefix(SpdxConstants.ORGANIZATION)?.let {
+            return sortedSetOf(it)
+        }
+    }
+
+    return sortedSetOf()
+}
 
 /**
  * Return the [PackageLinkage] between [dependency] and [dependant] as specified in [relationships]. If no
@@ -338,7 +348,8 @@ class SpdxDocumentFile(
     private fun SpdxPackage.toIdentifier() =
         Identifier(
             type = managerName,
-            namespace = originator?.extractOrganization().orEmpty(),
+            namespace = listOfNotNull(supplier, originator).firstOrNull()
+                ?.withoutPrefix(SpdxConstants.ORGANIZATION).orEmpty(),
             name = name,
             version = versionInfo
         )
@@ -359,8 +370,7 @@ class SpdxDocumentFile(
         return Package(
             id = id,
             purl = locateExternalReference(SpdxExternalReference.Type.Purl) ?: id.toPurl(),
-            // TODO: Find a way to track authors.
-            authors = sortedSetOf(),
+            authors = originator.wrapPresentInSortedSet(),
             declaredLicenses = sortedSetOf(licenseDeclared),
             concludedLicense = getConcludedLicense(),
             description = packageDescription,
@@ -516,9 +526,8 @@ class SpdxDocumentFile(
             // or a package-style SPDX document that describes a single (dependency-)package.
             spdxDocument.isProject()
         }.keys.toList().also { remainingFiles ->
-            if (remainingFiles.isEmpty()) {
-                return definitionFiles
-            }
+            if (remainingFiles.isEmpty()) return definitionFiles
+
             val discardedFiles = definitionFiles - remainingFiles
             if (discardedFiles.isNotEmpty()) {
                 log.info {
@@ -527,7 +536,7 @@ class SpdxDocumentFile(
             }
         }
 
-    override fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult> {
+    override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         // For direct callers of this function mapDefinitionFiles() did not populate the map before, so add a fallback.
         val spdxDocument = spdxDocumentForFile.getOrPut(definitionFile) { SpdxModelMapper.read(definitionFile) }
 
@@ -559,11 +568,9 @@ class SpdxDocumentFile(
         val project = Project(
             id = projectPackage.toIdentifier(),
             definitionFilePath = VersionControlSystem.getPathInfo(definitionFile).path,
-            // TODO: Find a way to track authors.
-            authors = sortedSetOf(),
+            authors = projectPackage.originator.wrapPresentInSortedSet(),
             declaredLicenses = sortedSetOf(projectPackage.licenseDeclared),
-            vcs = VcsInfo.EMPTY,
-            vcsProcessed = processProjectVcs(definitionFile.parentFile, VcsInfo.EMPTY, projectPackage.homepage),
+            vcs = processProjectVcs(definitionFile.parentFile, VcsInfo.EMPTY),
             homepageUrl = projectPackage.homepage.mapNotPresentToEmpty(),
             scopeDependencies = scopes
         )

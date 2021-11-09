@@ -44,16 +44,16 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
-import org.ossreviewtoolkit.utils.CommandLineTool
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.ProcessCapture
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.realFile
-import org.ossreviewtoolkit.utils.safeCopyRecursively
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.toUri
+import org.ossreviewtoolkit.utils.common.CommandLineTool
+import org.ossreviewtoolkit.utils.common.ProcessCapture
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.realFile
+import org.ossreviewtoolkit.utils.common.safeCopyRecursively
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.toUri
+import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 /**
  * A map of legacy package manager file names "dep" can import, and their respective lock file names, if any.
@@ -94,7 +94,7 @@ class GoDep(
     override fun transformVersion(output: String) =
         output.lineSequence().first { it.contains("version") }.substringAfter(':').trim().removePrefix("v")
 
-    override fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult> {
+    override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val projectDir = resolveProjectRoot(definitionFile)
         val projectVcs = processProjectVcs(projectDir)
         val gopath = createTempDirectory("$ORT_NAME-${projectDir.name}-gopath").toFile()
@@ -269,9 +269,7 @@ class GoDep(
                 "build constraints exclude all Go files in"
             )
 
-            if (!errorMessagesToIgnore.any { it in msg }) {
-                throw IOException(msg)
-            }
+            if (!errorMessagesToIgnore.any { it in msg }) throw IOException(msg)
         }
 
         val repoRoot = Paths.get(gopath.path, "src", importPath).toFile()

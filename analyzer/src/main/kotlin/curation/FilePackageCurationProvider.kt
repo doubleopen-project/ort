@@ -27,8 +27,8 @@ import org.ossreviewtoolkit.model.FileFormat
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.PackageCuration
 import org.ossreviewtoolkit.model.readValueOrDefault
-import org.ossreviewtoolkit.spdx.getDuplicates
-import org.ossreviewtoolkit.utils.log
+import org.ossreviewtoolkit.utils.common.getDuplicates
+import org.ossreviewtoolkit.utils.core.log
 
 /**
  * A [PackageCurationProvider] that loads [PackageCuration]s from all given curation files. Supports all file formats
@@ -48,12 +48,12 @@ class FilePackageCurationProvider(curationFiles: Collection<File>) : PackageCura
     }
 
     val packageCurations: Set<PackageCuration> = run {
-        val allCurations = curationFiles.mapNotNull { curationFile ->
+        val allCurations = curationFiles.map { curationFile ->
             runCatching {
                 curationFile.readValueOrDefault(emptyList<PackageCuration>())
             }.onFailure {
                 log.warn { "Failed parsing package curation from '${curationFile.absoluteFile}'." }
-            }.getOrNull()
+            }.getOrThrow()
         }.flatten()
 
         val duplicates = allCurations.getDuplicates()

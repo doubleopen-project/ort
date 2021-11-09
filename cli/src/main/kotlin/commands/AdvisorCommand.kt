@@ -36,14 +36,18 @@ import com.github.ajalt.clikt.parameters.types.file
 
 import org.ossreviewtoolkit.advisor.Advisor
 import org.ossreviewtoolkit.cli.GlobalOptions
-import org.ossreviewtoolkit.cli.concludeSeverityStats
+import org.ossreviewtoolkit.cli.utils.SeverityStats
+import org.ossreviewtoolkit.cli.utils.configurationGroup
 import org.ossreviewtoolkit.cli.utils.outputGroup
 import org.ossreviewtoolkit.cli.utils.readOrtResult
 import org.ossreviewtoolkit.cli.utils.writeOrtResult
 import org.ossreviewtoolkit.model.FileFormat
+import org.ossreviewtoolkit.model.utils.DefaultResolutionProvider
 import org.ossreviewtoolkit.model.utils.mergeLabels
-import org.ossreviewtoolkit.utils.expandTilde
-import org.ossreviewtoolkit.utils.safeMkdirs
+import org.ossreviewtoolkit.utils.common.expandTilde
+import org.ossreviewtoolkit.utils.common.safeMkdirs
+import org.ossreviewtoolkit.utils.core.ORT_RESOLUTIONS_FILENAME
+import org.ossreviewtoolkit.utils.core.ortConfigDirectory
 
 class AdvisorCommand : CliktCommand(name = "advise", help = "Check dependencies for security vulnerabilities.") {
     private val allVulnerabilityProvidersByName = Advisor.ALL.associateBy { it.providerName }
@@ -76,6 +80,15 @@ class AdvisorCommand : CliktCommand(name = "advise", help = "Check dependencies 
         help = "Set a label in the ORT result, overwriting any existing label of the same name. Can be used multiple " +
                 "times. For example: --label distribution=external"
     ).associate()
+
+    private val resolutionsFile by option(
+        "--resolutions-file",
+        help = "A file containing issue and rule violation resolutions."
+    ).convert { it.expandTilde() }
+        .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
+        .convert { it.absoluteFile.normalize() }
+        .default(ortConfigDirectory.resolve(ORT_RESOLUTIONS_FILENAME))
+        .configurationGroup()
 
     private val globalOptionsForSubcommands by requireObject<GlobalOptions>()
 
@@ -114,7 +127,7 @@ class AdvisorCommand : CliktCommand(name = "advise", help = "Check dependencies 
         val advisor = Advisor(distinctProviders, config.advisor)
 
         val ortResultInput = readOrtResult(ortFile)
-        val ortResultOutput = advisor.retrieveVulnerabilityInformation(ortResultInput, skipExcluded).mergeLabels(labels)
+        val ortResultOutput = advisor.retrieveFindings(ortResultInput, skipExcluded).mergeLabels(labels)
 
         outputDir.safeMkdirs()
         writeOrtResult(ortResultOutput, outputFiles, "advisor")
@@ -126,7 +139,11 @@ class AdvisorCommand : CliktCommand(name = "advise", help = "Check dependencies 
             throw ProgramResult(1)
         }
 
-        val counts = advisorResults.collectIssues().flatMap { it.value }.groupingBy { it.severity }.eachCount()
-        concludeSeverityStats(counts, config.severeIssueThreshold, 2)
+        val resolutionProvider = DefaultResolutionProvider.create(ortResultOutput, resolutionsFile)
+        val (resolvedIssues, unresolvedIssues) =
+            advisorResults.collectIssues().flatMap { it.value }.partition { resolutionProvider.isResolved(it) }
+        val severityStats = SeverityStats.createFromIssues(resolvedIssues, unresolvedIssues)
+
+        severityStats.print().conclude(config.severeIssueThreshold, 2)
     }
 }

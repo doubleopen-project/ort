@@ -7,13 +7,15 @@ ORT:
 * Install ORT.
 * Analyze the dependencies of `mime-types` using the _analyzer_.
 * Scan the source code of `mime-types` and its dependencies using the `scanner`.
+* Run the evaluator to find any rule violations.
+* Generate reports to show the results.
 
 ## 1. Prerequisites
 
 ORT is tested to run on Linux, macOS, and Windows. This tutorial assumes that you are running on Linux, but it should be
 easy to adapt the commands to macOS or Windows.
 
-In addition to Java (version >= 8), for some of the supported package managers and Version Control Systems additional
+In addition to Java (version >= 11), for some of the supported package managers and Version Control Systems additional
 tools need to be installed. In the context of this tutorial the following tools are required:
 
 * Git (any recent version will do)
@@ -85,7 +87,7 @@ The following package managers are activated:
         Bower, Bundler, Cargo, Composer, DotNet, GoDep, Gradle, Maven, NPM, NuGet, PIP, SBT, Stack, Yarn
 Analyzing project path:
         [mime-types-dir]
-ERROR - Resolving dependencies for 'package.json' failed with: No lockfile found in '[mime-types-dir]'. This potentially results in unstable versions of dependencies. To allow this, enable support for dynamic versions.
+ERROR - Resolving dependencies for 'package.json' failed with: No lockfile found in '[mime-types-dir]'. This potentially results in unstable versions of dependencies. To support this, enable the 'allowDynamicVersions' option in 'ort.conf'.
 Writing analyzer result to '[analyzer-output-dir]/analyzer-result.yml'.
 ```
 

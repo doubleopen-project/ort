@@ -34,10 +34,10 @@ import org.ossreviewtoolkit.model.ScanResultContainer
 import org.ossreviewtoolkit.model.Success
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.scanner.ScanResultsStorage
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.storage.FileStorage
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.showStackTrace
+import org.ossreviewtoolkit.utils.core.storage.FileStorage
 
 const val SCAN_RESULTS_FILE_NAME = "scan-results.yml"
 
@@ -81,6 +81,15 @@ class FileBasedStorage(
         val existingScanResults = when (val readResult = read(id)) {
             is Success -> readResult.result
             is Failure -> emptyList()
+        }
+
+        if (existingScanResults.any { it.scanner == scanResult.scanner && it.provenance == scanResult.provenance }) {
+            val message = "Did not store scan result for '${id.toCoordinates()}' because a scan result for the same " +
+                    "scanner and provenance was already stored."
+
+            log.warn { message }
+
+            return Failure(message)
         }
 
         val scanResults = existingScanResults + scanResult

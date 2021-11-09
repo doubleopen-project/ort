@@ -56,9 +56,9 @@ import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
 import org.ossreviewtoolkit.notifier.Notifier
 import org.ossreviewtoolkit.reporter.HowToFixTextProvider
 import org.ossreviewtoolkit.reporter.ReporterInput
-import org.ossreviewtoolkit.reporter.reporters.AsciiDocTemplateReporter
-import org.ossreviewtoolkit.spdx.toSpdx
-import org.ossreviewtoolkit.utils.ORT_REPO_CONFIG_FILENAME
+import org.ossreviewtoolkit.reporter.reporters.freemarker.asciidoc.PdfTemplateReporter
+import org.ossreviewtoolkit.utils.core.ORT_REPO_CONFIG_FILENAME
+import org.ossreviewtoolkit.utils.spdx.toSpdx
 import org.ossreviewtoolkit.utils.test.createSpecTempDir
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
@@ -147,13 +147,12 @@ class ExamplesFunTest : StringSpec() {
 
             val result = evaluator.run(script)
 
-            result.violations shouldHaveSize 4
-            val failedRules = result.violations.map { it.rule }
-            failedRules shouldContainExactlyInAnyOrder listOf(
+            result.violations.map { it.rule } shouldContainExactlyInAnyOrder listOf(
                 "UNHANDLED_LICENSE",
                 "COPYLEFT_LIMITED_IN_SOURCE",
                 "VULNERABILITY_IN_PACKAGE",
-                "HIGH_SEVERITY_VULNERABILITY_IN_PACKAGE"
+                "HIGH_SEVERITY_VULNERABILITY_IN_PACKAGE",
+                "DEPRECATED_SCOPE_EXCLUDE_REASON_IN_ORT_YML"
             )
         }
 
@@ -162,7 +161,7 @@ class ExamplesFunTest : StringSpec() {
 
             takeExampleFile("asciidoctor-pdf-theme.yml")
 
-            val report = AsciiDocTemplateReporter().generateReport(
+            val report = PdfTemplateReporter().generateReport(
                 ReporterInput(OrtResult.EMPTY),
                 outputDir,
                 mapOf("pdf.theme.file" to examplesDir.resolve("asciidoctor-pdf-theme.yml").path)
@@ -197,7 +196,9 @@ class ExamplesFunTest : StringSpec() {
             greenMail.waitForIncomingEmail(1000, 1) shouldBe true
             val actualBody = GreenMailUtil.getBody(greenMail.receivedMessages[0])
 
-            actualBody shouldBe "Number of issues found: ${ortResult.collectIssues().size}"
+            actualBody shouldContain "Content-Type: text/html; charset=UTF-8"
+            actualBody shouldContain "Content-Type: text/plain; charset=UTF-8" // Fallback
+            actualBody shouldContain "Number of issues found: ${ortResult.collectIssues().size}"
 
             greenMail.stop()
         }

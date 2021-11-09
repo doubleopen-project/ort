@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,16 +34,18 @@ import org.ossreviewtoolkit.model.readJsonFile
 import org.ossreviewtoolkit.scanner.AbstractScannerFactory
 import org.ossreviewtoolkit.scanner.LocalScanner
 import org.ossreviewtoolkit.scanner.ScanException
-import org.ossreviewtoolkit.spdx.calculatePackageVerificationCode
-import org.ossreviewtoolkit.utils.Os
-import org.ossreviewtoolkit.utils.ProcessCapture
-import org.ossreviewtoolkit.utils.log
+import org.ossreviewtoolkit.scanner.experimental.LocalScannerWrapper
+import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.ProcessCapture
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.spdx.calculatePackageVerificationCode
 
 class Licensee(
     name: String,
     scannerConfig: ScannerConfiguration,
     downloaderConfig: DownloaderConfiguration
-) : LocalScanner(name, scannerConfig, downloaderConfig) {
+) : LocalScanner(name, scannerConfig, downloaderConfig), LocalScannerWrapper {
     class Factory : AbstractScannerFactory<Licensee>("Licensee") {
         override fun create(scannerConfig: ScannerConfiguration, downloaderConfig: DownloaderConfiguration) =
             Licensee(scannerName, scannerConfig, downloaderConfig)
@@ -52,6 +55,8 @@ class Licensee(
         val CONFIGURATION_OPTIONS = listOf("--json")
     }
 
+    override val name = "Licensee"
+    override val criteria by lazy { getScannerCriteria() }
     override val expectedVersion = "9.13.0"
     override val configuration = CONFIGURATION_OPTIONS.joinToString(" ")
     override val resultFileExt = "json"
@@ -133,4 +138,7 @@ class Licensee(
             issues = mutableListOf()
         )
     }
+
+    override fun scanPath(path: File): ScanSummary =
+        scanPathInternal(path, createOrtTempDir(name).resolve("result.$resultFileExt"))
 }

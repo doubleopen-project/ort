@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.2
 
 # Copyright (C) 2020 Bosch Software Innovations GmbH
+# Copyright (C) 2021 Bosch.IO GmbH
 # Copyright (C) 2021 Alliander N.V.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,10 +49,9 @@ FROM adoptopenjdk:11-jre-hotspot-bionic
 ENV \
     # Package manager versions.
     BOWER_VERSION=1.8.8 \
-    BUNDLER_VERSION=1.16.1-1 \
-    CARGO_VERSION=0.52.0-0ubuntu1~18.04.1 \
+    CARGO_VERSION=0.54.0-0ubuntu1~18.04.1 \
     COMPOSER_VERSION=1.6.3-1 \
-    CONAN_VERSION=1.18.0 \
+    CONAN_VERSION=1.40.3 \
     GO_DEP_VERSION=0.5.4 \
     GO_VERSION=1.16.5 \
     HASKELL_STACK_VERSION=2.1.3 \
@@ -74,7 +74,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Apt install commands.
 RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/apt \
     apt-get update && \
-    apt-get install -y --no-install-recommends gnupg software-properties-common && \
+    apt-get install -y --no-install-recommends ca-certificates gnupg software-properties-common && \
     echo "deb https://repo.scala-sbt.org/scalasbt/debian /" | tee -a /etc/apt/sources.list.d/sbt.list && \
     curl -ksS "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key adv --import - && \
     curl -sL https://deb.nodesource.com/setup_16.x | bash - && \
@@ -101,7 +101,6 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
         mercurial \
         subversion \
         # Install package managers (in versions known to work).
-        bundler=$BUNDLER_VERSION \
         cargo=$CARGO_VERSION \
         composer=$COMPOSER_VERSION \
         nodejs \

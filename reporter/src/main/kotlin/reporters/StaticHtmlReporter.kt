@@ -45,25 +45,26 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.licenses.ResolvedLicenseLocation
 import org.ossreviewtoolkit.model.yamlMapper
+import org.ossreviewtoolkit.reporter.ReportTableModel
+import org.ossreviewtoolkit.reporter.ReportTableModel.IssueTable
+import org.ossreviewtoolkit.reporter.ReportTableModel.ProjectTable
+import org.ossreviewtoolkit.reporter.ReportTableModel.ResolvableIssue
+import org.ossreviewtoolkit.reporter.ReportTableModelMapper
 import org.ossreviewtoolkit.reporter.Reporter
 import org.ossreviewtoolkit.reporter.ReporterInput
+import org.ossreviewtoolkit.reporter.SCOPE_EXCLUDE_LIST_COMPARATOR
+import org.ossreviewtoolkit.reporter.containsUnresolved
 import org.ossreviewtoolkit.reporter.description
-import org.ossreviewtoolkit.reporter.utils.ReportTableModel
-import org.ossreviewtoolkit.reporter.utils.ReportTableModel.IssueTable
-import org.ossreviewtoolkit.reporter.utils.ReportTableModel.ProjectTable
-import org.ossreviewtoolkit.reporter.utils.ReportTableModel.ResolvableIssue
-import org.ossreviewtoolkit.reporter.utils.ReportTableModelMapper
-import org.ossreviewtoolkit.reporter.utils.SCOPE_EXCLUDE_LIST_COMPARATOR
-import org.ossreviewtoolkit.reporter.utils.containsUnresolved
-import org.ossreviewtoolkit.spdx.SpdxCompoundExpression
-import org.ossreviewtoolkit.spdx.SpdxConstants
-import org.ossreviewtoolkit.spdx.SpdxExpression
-import org.ossreviewtoolkit.spdx.SpdxLicenseIdExpression
-import org.ossreviewtoolkit.spdx.SpdxLicenseWithExceptionExpression
-import org.ossreviewtoolkit.utils.Environment
-import org.ossreviewtoolkit.utils.ORT_FULL_NAME
-import org.ossreviewtoolkit.utils.isValidUri
-import org.ossreviewtoolkit.utils.normalizeLineBreaks
+import org.ossreviewtoolkit.utils.common.isMavenCentralUrl
+import org.ossreviewtoolkit.utils.common.isValidUri
+import org.ossreviewtoolkit.utils.common.normalizeLineBreaks
+import org.ossreviewtoolkit.utils.core.Environment
+import org.ossreviewtoolkit.utils.core.ORT_FULL_NAME
+import org.ossreviewtoolkit.utils.spdx.SpdxCompoundExpression
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.spdx.SpdxLicenseIdExpression
+import org.ossreviewtoolkit.utils.spdx.SpdxLicenseWithExceptionExpression
 
 @Suppress("LargeClass", "TooManyFunctions")
 class StaticHtmlReporter : Reporter {
@@ -295,7 +296,7 @@ class StaticHtmlReporter : Reporter {
                 }
             }
             td { +ruleViolation.violation.rule }
-            td { +ruleViolation.violation.pkg.toCoordinates() }
+            td { +(ruleViolation.violation.pkg?.toCoordinates() ?: "-") }
             td {
                 +if (ruleViolation.violation.license != null) {
                     "${ruleViolation.violation.licenseSource}: ${ruleViolation.violation.license}"
@@ -714,8 +715,7 @@ private fun ResolvedLicenseLocation.permalink(id: Identifier): String? {
 
     (provenance as? ArtifactProvenance)?.let {
         if (it.sourceArtifact != RemoteArtifact.EMPTY) {
-            val mavenCentralPattern = Regex("https?://repo[^/]+maven[^/]+org/.*")
-            if (it.sourceArtifact.url.matches(mavenCentralPattern)) {
+            if (isMavenCentralUrl(it.sourceArtifact.url)) {
                 // At least for source artifacts on Maven Central, use the "proxy" from Sonatype which has the
                 // Archive Browser plugin installed to link to the files with findings.
                 return with(id) {

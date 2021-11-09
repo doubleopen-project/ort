@@ -38,8 +38,8 @@ import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.config.ScannerOptions
 import org.ossreviewtoolkit.model.utils.filterByProject
-import org.ossreviewtoolkit.utils.Environment
-import org.ossreviewtoolkit.utils.log
+import org.ossreviewtoolkit.utils.core.Environment
+import org.ossreviewtoolkit.utils.core.log
 
 const val TOOL_NAME = "scanner"
 
@@ -48,6 +48,7 @@ const val TOOL_NAME = "scanner"
  * [outputDirectory]. If [skipExcluded] is true, packages for which excludes are defined are not scanned. Return scan
  * results as an [OrtResult].
  */
+@JvmOverloads
 fun scanOrtResult(
     scanner: Scanner,
     ortResult: OrtResult,
@@ -60,6 +61,7 @@ fun scanOrtResult(
  * respectively. Scan results are stored in the [outputDirectory]. If [skipExcluded] is true, packages for which
  * excludes are defined are not scanned. Return scan results as an [OrtResult].
  */
+@JvmOverloads
 fun scanOrtResult(
     scanner: Scanner,
     projectScanner: Scanner,
@@ -87,35 +89,40 @@ fun scanOrtResult(
         .filter { it.pkg.id !in projectPackageIds }
         .map { it.pkg }
 
-    val filteredProjectPackages = projectPackages.takeUnless { scanner.scannerConfig.skipConcluded }
-        // Remove all packages that have a concluded license and authors set.
-        ?: projectPackages.partition { it.concludedLicense != null && it.authors.isNotEmpty() }.let { (skip, keep) ->
-            if (skip.isNotEmpty()) {
-                projectScanner.log.debug { "Not scanning the following packages with concluded licenses: $skip" }
+    fun removeConcludedPackages(packages: Set<Package>, scanner: Scanner): Set<Package> =
+        packages.takeUnless { scanner.scannerConfig.skipConcluded }
+            // Remove all packages that have a concluded license and authors set.
+            ?: packages.partition { it.concludedLicense != null && it.authors.isNotEmpty() }.let { (skip, keep) ->
+                if (skip.isNotEmpty()) {
+                    scanner.log.debug { "Not scanning the following packages with concluded licenses: $skip" }
+                }
+
+                keep.toSet()
             }
 
-            keep
-        }
-
-    val filteredPackages = packages.takeUnless { scanner.scannerConfig.skipConcluded }
-        // Remove all packages that have a concluded license and authors set.
-        ?: packages.partition { it.concludedLicense != null && it.authors.isNotEmpty() }.let { (skip, keep) ->
-            if (skip.isNotEmpty()) {
-                scanner.log.debug { "Not scanning the following packages with concluded licenses: $skip" }
-            }
-
-            keep
-        }
+    val filteredProjectPackages = removeConcludedPackages(projectPackages, projectScanner)
+    val filteredPackages = removeConcludedPackages(packages.toSet(), scanner)
 
     val scanResults = runBlocking {
         // Scan the projects from the ORT result.
         val deferredProjectScan = async {
-            projectScanner.scanPackages(filteredProjectPackages, outputDirectory).mapKeys { it.key.id }
+            if (filteredProjectPackages.isNotEmpty()) {
+                projectScanner.scanPackages(filteredProjectPackages, outputDirectory, ortResult.labels)
+                    .mapKeys { it.key.id }
+            } else {
+                projectScanner.log.info { "No projects to scan." }
+                emptyMap()
+            }
         }
 
         // Scan the packages from the ORT result.
         val deferredPackageScan = async {
-            scanner.scanPackages(filteredPackages, outputDirectory).mapKeys { it.key.id }
+            if (filteredPackages.isNotEmpty()) {
+                scanner.scanPackages(filteredPackages, outputDirectory, ortResult.labels).mapKeys { it.key.id }
+            } else {
+                scanner.log.info { "No packages to scan." }
+                emptyMap()
+            }
         }
 
         val projectResults = deferredProjectScan.await()
@@ -174,17 +181,20 @@ abstract class Scanner(
         /**
          * The list of all available scanners in the classpath.
          */
-        val ALL by lazy { LOADER.iterator().asSequence().toList() }
+        val ALL by lazy { LOADER.iterator().asSequence().toList().sortedBy { it.scannerName } }
     }
 
     /**
      * Scan the [packages] and store the scan results in [outputDirectory]. [ScanResult]s are returned associated by
      * [Package]. The map may contain multiple results for the same [Package] if the storage contains more than one
      * result for the specification of this scanner.
+     * [labels] are the labels present in [OrtResult.labels], created by previous invocations of ORT tools. They can be
+     * used by scanner implementations to decide if and how packages are scanned.
      */
-    internal abstract suspend fun scanPackages(
-        packages: Collection<Package>,
-        outputDirectory: File
+    abstract suspend fun scanPackages(
+        packages: Set<Package>,
+        outputDirectory: File,
+        labels: Map<String, String>
     ): Map<Package, List<ScanResult>>
 
     /**

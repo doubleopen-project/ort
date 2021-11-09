@@ -43,7 +43,7 @@ import org.ossreviewtoolkit.analyzer.curation.FilePackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.SimplePackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.Sw360PackageCurationProvider
 import org.ossreviewtoolkit.cli.GlobalOptions
-import org.ossreviewtoolkit.cli.concludeSeverityStats
+import org.ossreviewtoolkit.cli.utils.SeverityStats
 import org.ossreviewtoolkit.cli.utils.configurationGroup
 import org.ossreviewtoolkit.cli.utils.inputGroup
 import org.ossreviewtoolkit.cli.utils.outputGroup
@@ -51,13 +51,15 @@ import org.ossreviewtoolkit.cli.utils.writeOrtResult
 import org.ossreviewtoolkit.model.FileFormat
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.readValueOrNull
+import org.ossreviewtoolkit.model.utils.DefaultResolutionProvider
 import org.ossreviewtoolkit.model.utils.mergeLabels
-import org.ossreviewtoolkit.utils.ORT_PACKAGE_CURATIONS_DIRNAME
-import org.ossreviewtoolkit.utils.ORT_PACKAGE_CURATIONS_FILENAME
-import org.ossreviewtoolkit.utils.ORT_REPO_CONFIG_FILENAME
-import org.ossreviewtoolkit.utils.expandTilde
-import org.ossreviewtoolkit.utils.ortConfigDirectory
-import org.ossreviewtoolkit.utils.safeMkdirs
+import org.ossreviewtoolkit.utils.common.expandTilde
+import org.ossreviewtoolkit.utils.common.safeMkdirs
+import org.ossreviewtoolkit.utils.core.ORT_PACKAGE_CURATIONS_DIRNAME
+import org.ossreviewtoolkit.utils.core.ORT_PACKAGE_CURATIONS_FILENAME
+import org.ossreviewtoolkit.utils.core.ORT_REPO_CONFIG_FILENAME
+import org.ossreviewtoolkit.utils.core.ORT_RESOLUTIONS_FILENAME
+import org.ossreviewtoolkit.utils.core.ortConfigDirectory
 
 class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine dependencies of a software project.") {
     private val allPackageManagersByName = PackageManager.ALL.associateBy { it.managerName }
@@ -112,6 +114,15 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
     ).convert { it.expandTilde() }
         .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
         .convert { it.absoluteFile.normalize() }
+        .configurationGroup()
+
+    private val resolutionsFile by option(
+        "--resolutions-file",
+        help = "A file containing issue and rule violation resolutions."
+    ).convert { it.expandTilde() }
+        .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
+        .convert { it.absoluteFile.normalize() }
+        .default(ortConfigDirectory.resolve(ORT_RESOLUTIONS_FILENAME))
         .configurationGroup()
 
     private val useClearlyDefinedCurations by option(
@@ -169,7 +180,7 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         println("Analyzing project path:\n\t$inputDir")
 
         val config = globalOptionsForSubcommands.config
-        val analyzer = Analyzer(config.analyzer)
+        val analyzer = Analyzer(config.analyzer, labels)
 
         val repositoryConfiguration = actualRepositoryConfigurationFile?.readValueOrNull() ?: RepositoryConfiguration()
 
@@ -186,14 +197,24 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
             )
         )
 
-        val ortResult = analyzer.analyze(
-            inputDir, distinctPackageManagers, curationProvider, repositoryConfiguration
-        ).mergeLabels(labels)
+        val info = analyzer.findManagedFiles(inputDir, distinctPackageManagers, repositoryConfiguration)
+        if (info.managedFiles.isEmpty()) {
+            println("No project found.")
+        } else {
+            val filesPerManager = info.managedFiles.mapKeysTo(sortedMapOf()) { it.key.managerName }
 
-        val analyzedProjects = ortResult.getProjects()
-        val countPerType = analyzedProjects.groupingBy { it.id.type }.eachCount()
-        val projectCountDetails = countPerType.toSortedMap().map { (type, count) -> "$type ($count)" }.joinToString()
-        println("Found ${analyzedProjects.size} project(s): $projectCountDetails")
+            filesPerManager.forEach { (manager, files) ->
+                println("Found ${files.size} $manager project(s) at:")
+                files.forEach { file ->
+                    val relativePath = file.toRelativeString(inputDir).takeIf { it.isNotEmpty() } ?: "."
+                    println("\t$relativePath")
+                }
+            }
+
+            println("Found ${filesPerManager.size} project(s) in total.")
+        }
+
+        val ortResult = analyzer.analyze(info, curationProvider).mergeLabels(labels)
 
         outputDir.safeMkdirs()
         writeOrtResult(ortResult, outputFiles, "analyzer")
@@ -205,7 +226,11 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
             throw ProgramResult(1)
         }
 
-        val counts = analyzerResult.collectIssues().flatMap { it.value }.groupingBy { it.severity }.eachCount()
-        concludeSeverityStats(counts, config.severeIssueThreshold, 2)
+        val resolutionProvider = DefaultResolutionProvider.create(ortResult, resolutionsFile)
+        val (resolvedIssues, unresolvedIssues) =
+            analyzerResult.collectIssues().flatMap { it.value }.partition { resolutionProvider.isResolved(it) }
+        val severityStats = SeverityStats.createFromIssues(resolvedIssues, unresolvedIssues)
+
+        severityStats.print().conclude(config.severeIssueThreshold, 2)
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Bosch.IO GmbH
+ * Copyright (C) 2020-2021 Bosch.IO GmbH
  * Copyright (C) 2021 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,7 +34,6 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
 import com.vdurmont.semver4j.Semver
 
-import io.kotest.assertions.fail
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.shouldHaveSize
@@ -53,19 +52,19 @@ import java.time.Instant
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Coordinates
 import org.ossreviewtoolkit.clients.clearlydefined.ComponentType
 import org.ossreviewtoolkit.clients.clearlydefined.Provider
-import org.ossreviewtoolkit.model.Failure
 import org.ossreviewtoolkit.model.Hash
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.Result
 import org.ossreviewtoolkit.model.ScanResult
-import org.ossreviewtoolkit.model.Success
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.ClearlyDefinedStorageConfiguration
 import org.ossreviewtoolkit.model.jsonMapper
 import org.ossreviewtoolkit.scanner.ScannerCriteria
+import org.ossreviewtoolkit.utils.test.shouldBeFailure
+import org.ossreviewtoolkit.utils.test.shouldBeSuccess
 
 private const val PACKAGE_TYPE = "Maven"
 private const val NAMESPACE = "someNamespace"
@@ -74,8 +73,11 @@ private const val VERSION = "0.1.8"
 private const val COMMIT = "02b7f3d06fcbbedb44563aaa88ab62db3669946e"
 private const val SCANCODE_VERSION = "3.2.2"
 
-/** The name of the file with the test results from ClearlyDefined. */
-private const val RESULT_FILE = "clearlydefined_scancode.json"
+private const val TEST_FILES_ROOT = "src/test/assets"
+private const val TEST_FILES_DIRECTORY = "clearly-defined"
+
+/** The name of the file with the test response from ClearlyDefined. */
+private const val RESPONSE_FILE = "scancode-$SCANCODE_VERSION.json"
 
 /** A delta for comparing timestamps against the current time. */
 private val MAX_TIME_DELTA = Duration.ofSeconds(30)
@@ -161,7 +163,7 @@ private fun stubHarvestToolResponse(wiremock: WireMockServer, coordinates: Coord
             .withQueryParam("form", equalTo("streamed"))
             .willReturn(
                 aResponse().withStatus(200)
-                    .withBodyFile(RESULT_FILE)
+                    .withBodyFile("$TEST_FILES_DIRECTORY/$RESPONSE_FILE")
             )
     )
 }
@@ -183,49 +185,42 @@ private fun stubDefinitions(wiremock: WireMockServer, coordinates: Coordinates =
 }
 
 /**
- * Check that the given [result] contains expected data.
+ * Check that this [Result] contains the expected data and return the first scan result from the list on success.
  */
-private fun assertValidResult(result: Result<List<ScanResult>>): ScanResult =
-    when (result) {
-        is Success -> {
-            result.result shouldHaveSize 1
+private fun Result<List<ScanResult>>.shouldBeValid(): ScanResult {
+    shouldBeSuccess()
+    result shouldHaveSize 1
 
-            val scanResult = result.result.first()
-            scanResult.summary.licenseFindings.find {
-                it.location.path == TEST_PATH && it.license.licenses().contains("Apache-2.0")
-            } shouldNot beNull()
+    val scanResult = result.first()
+    scanResult.summary.licenseFindings.find {
+        it.location.path == TEST_PATH && it.license.licenses().contains("Apache-2.0")
+    } shouldNot beNull()
 
-            scanResult
-        }
-
-        is Failure -> fail("Expected success result, but got Failure(${result.error})")
-    }
-
-/**
- * Check that the given [result] does not contain any data.
- */
-private fun assertEmptyResult(result: Result<List<ScanResult>>) {
-    when (result) {
-        is Success -> result.result should beEmpty()
-        is Failure -> fail("Unexpected result: $result")
-    }
+    return scanResult
 }
 
 /**
- * Check whether the given [time] is close to the current time. This is used to check whether correct
- * timestamps are set.
+ * Check that this [Result] does not contain any data.
  */
-private fun assertCurrentTime(time: Instant) {
-    val delta = Duration.between(time, Instant.now())
+private fun Result<List<ScanResult>>.shouldBeEmpty() {
+    shouldBeSuccess()
+    result should beEmpty()
+}
+
+/**
+ * Check whether this [Instant] is close to the current time. This is used to check whether correct timestamps are set.
+ */
+private fun Instant.shouldBeCloseToCurrentTime(maxDelta: Duration = MAX_TIME_DELTA) {
+    val delta = Duration.between(this, Instant.now())
     delta.isNegative shouldBe false
-    delta.compareTo(MAX_TIME_DELTA) shouldBeLessThan 0
+    delta.compareTo(maxDelta) shouldBeLessThan 0
 }
 
 /**
  * Read the template for a ClearlyDefines definitions request from the test file.
  */
 private fun readDefinitionsTemplate(): String {
-    val templateFile = File("src/test/assets/cd_definitions.json")
+    val templateFile = File("$TEST_FILES_ROOT/cd_definitions.json")
     return templateFile.readText()
 }
 
@@ -233,7 +228,7 @@ class ClearlyDefinedStorageTest : WordSpec({
     val wiremock = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
-            .usingFilesUnderDirectory("src/test/assets/")
+            .usingFilesUnderDirectory(TEST_FILES_ROOT)
     )
 
     beforeSpec {
@@ -260,7 +255,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(TEST_PACKAGE, SCANNER_CRITERIA))
+            storage.read(TEST_PACKAGE, SCANNER_CRITERIA).shouldBeValid()
         }
 
         "load existing scan results for an identifier from ClearlyDefined" {
@@ -273,7 +268,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(TEST_IDENTIFIER))
+            storage.read(TEST_IDENTIFIER).shouldBeValid()
         }
 
         "choose the correct tool URL if there are multiple" {
@@ -288,7 +283,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(TEST_PACKAGE, SCANNER_CRITERIA))
+            storage.read(TEST_PACKAGE, SCANNER_CRITERIA).shouldBeValid()
         }
 
         "set correct metadata in the package scan result" {
@@ -301,11 +296,11 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            val result = assertValidResult(storage.read(TEST_IDENTIFIER))
+            val result = storage.read(TEST_IDENTIFIER).shouldBeValid()
             result.scanner.name shouldBe "ScanCode"
             result.scanner.version shouldBe "3.0.2"
-            assertCurrentTime(result.summary.startTime)
-            assertCurrentTime(result.summary.endTime)
+            result.summary.startTime.shouldBeCloseToCurrentTime()
+            result.summary.endTime.shouldBeCloseToCurrentTime()
         }
 
         "return a failure if a ClearlyDefined request fails" {
@@ -316,10 +311,10 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            when (val result = storage.read(TEST_IDENTIFIER)) {
-                is Success -> fail("Expected failure, but got $result")
-                is Failure -> result.error shouldContain "HttpException"
-            }
+            val result = storage.read(TEST_IDENTIFIER)
+
+            result.shouldBeFailure()
+            result.error shouldContain "HttpException"
         }
 
         "return an empty result if no results for the scancode tool are available" {
@@ -328,7 +323,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertEmptyResult(storage.read(TEST_IDENTIFIER))
+            storage.read(TEST_IDENTIFIER).shouldBeEmpty()
         }
 
         "return an empty result if no result for the tool file is returned" {
@@ -341,7 +336,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertEmptyResult(storage.read(TEST_PACKAGE, SCANNER_CRITERIA))
+            storage.read(TEST_PACKAGE, SCANNER_CRITERIA).shouldBeEmpty()
         }
 
         "use GitHub VCS info if available" {
@@ -359,7 +354,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(pkg, SCANNER_CRITERIA))
+            storage.read(pkg, SCANNER_CRITERIA).shouldBeValid()
         }
 
         "only use VCS info pointing to GitHub" {
@@ -372,7 +367,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(pkg, SCANNER_CRITERIA))
+            storage.read(pkg, SCANNER_CRITERIA).shouldBeValid()
         }
 
         "use information from a source artifact if available" {
@@ -386,7 +381,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertValidResult(storage.read(pkg, SCANNER_CRITERIA))
+            storage.read(pkg, SCANNER_CRITERIA).shouldBeValid()
         }
 
         "return an empty result if the coordinates are not supported by ClearlyDefined" {
@@ -394,7 +389,7 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertEmptyResult(storage.read(id))
+            storage.read(id).shouldBeEmpty()
         }
 
         "return a failure if a harvest tool request returns an unexpected result" {
@@ -408,10 +403,10 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            when (val result = storage.read(TEST_IDENTIFIER)) {
-                is Failure -> result.error shouldContain "JsonParseException"
-                else -> fail("Unexpected result: $result")
-            }
+            val result = storage.read(TEST_IDENTIFIER)
+
+            result.shouldBeFailure()
+            result.error shouldContain "JsonParseException"
         }
 
         "return an empty result if a harvest tool file request returns an unexpected result" {
@@ -427,20 +422,20 @@ class ClearlyDefinedStorageTest : WordSpec({
 
             val storage = ClearlyDefinedStorage(storageConfiguration(wiremock))
 
-            assertEmptyResult(storage.read(TEST_IDENTIFIER))
+            storage.read(TEST_IDENTIFIER).shouldBeEmpty()
         }
 
         "return a failure if the connection to the server fails" {
-            // find a port on which no service is running
+            // Find a port on which no service is running.
             val port = ServerSocket(0).use { it.localPort }
             val serverUrl = "http://localhost:$port"
 
             val storage = ClearlyDefinedStorage(ClearlyDefinedStorageConfiguration((serverUrl)))
 
-            when (val result = storage.read(TEST_IDENTIFIER)) {
-                is Failure -> result.error shouldContain "ConnectException"
-                else -> fail("Unexpected result: $result")
-            }
+            val result = storage.read(TEST_IDENTIFIER)
+
+            result.shouldBeFailure()
+            result.error shouldContain "Connection refused"
         }
     }
 })

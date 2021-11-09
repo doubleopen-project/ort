@@ -51,9 +51,9 @@ import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.utils.DependencyGraphBuilder
-import org.ossreviewtoolkit.utils.Os
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.temporaryProperties
+import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.temporaryProperties
+import org.ossreviewtoolkit.utils.core.log
 
 private val GRADLE_USER_HOME = Os.env["GRADLE_USER_HOME"]?.let { File(it) } ?: Os.userHomeDirectory.resolve(".gradle")
 
@@ -91,8 +91,7 @@ class Gradle(
         private val gradleCacheRoot = GRADLE_USER_HOME.resolve("caches/modules-2/files-2.1")
 
         override fun findArtifact(artifact: Artifact): File? {
-            val artifactRootDir = File(
-                gradleCacheRoot,
+            val artifactRootDir = gradleCacheRoot.resolve(
                 "${artifact.groupId}/${artifact.artifactId}/${artifact.version}"
             )
 
@@ -124,7 +123,7 @@ class Gradle(
     override fun createPackageManagerResult(projectResults: Map<File, List<ProjectAnalyzerResult>>) =
         PackageManagerResult(projectResults, graphBuilder.build(), graphBuilder.packages())
 
-    override fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult> {
+    override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val gradleSystemProperties = mutableListOf<Pair<String, String>>()
         val gradleProperties = mutableListOf<Pair<String, String>>()
 
@@ -257,7 +256,7 @@ class Gradle(
                     vcs = VcsInfo.EMPTY,
                     vcsProcessed = processProjectVcs(definitionFile.parentFile),
                     homepageUrl = "",
-                    scopeNames = dependencyTreeModel.configurations.map { it.name }.toSortedSet()
+                    scopeNames = graphBuilder.scopesFor(projectId)
                 )
 
                 val issues = mutableListOf<OrtIssue>()

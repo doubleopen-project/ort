@@ -25,7 +25,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.vdurmont.semver4j.Requirement
 
 import java.io.File
-import java.io.IOException
 import java.lang.IllegalArgumentException
 import java.util.SortedSet
 
@@ -47,20 +46,18 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.jsonMapper
-import org.ossreviewtoolkit.utils.CommandLineTool
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.OkHttpClientHelper
-import org.ossreviewtoolkit.utils.Os
-import org.ossreviewtoolkit.utils.ProcessCapture
-import org.ossreviewtoolkit.utils.getPathFromEnvironment
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.normalizeLineBreaks
-import org.ossreviewtoolkit.utils.resolveWindowsExecutable
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.textValueOrEmpty
+import org.ossreviewtoolkit.utils.common.CommandLineTool
+import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.ProcessCapture
+import org.ossreviewtoolkit.utils.common.normalizeLineBreaks
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.textValueOrEmpty
+import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.log
 
-// The lowest version that supports "--prefer-binary".
-private const val PIP_VERSION = "18.0"
+// The lowest version that supports "--prefer-binary" and PEP 508 URL requirements to be used as dependencies.
+private const val PIP_VERSION = "18.1"
 
 private const val PIPDEPTREE_VERSION = "0.13.2"
 
@@ -87,10 +84,9 @@ object VirtualEnv : CommandLineTool {
         // virtualenv 20.0.14 from /usr/local/lib/python2.7/dist-packages/virtualenv/__init__.pyc
         output.removePrefix("virtualenv ").substringBefore(' ')
 
-    // Allow to use versions that are known to work. Note that virtualenv bundles a version of pip. Exclude version 20.3
-    // for now as is comes with a new dependency resolver that we yet need to test, see
-    // http://pyfound.blogspot.com/2020/11/pip-20-3-new-resolver.html.
-    override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[15.1,20.3[")
+    // Ensure a minimum version known to work. Note that virtualenv bundles a version of pip, and as of pip 20.3 a new
+    // dependency resolver is used, see http://pyfound.blogspot.com/2020/11/pip-20-3-new-resolver.html.
+    override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[15.1,)")
 }
 
 object PythonVersion : CommandLineTool {
@@ -128,22 +124,22 @@ object PythonVersion : CommandLineTool {
     /**
      * Return the absolute path to the Python interpreter for the given [version]. This is helpful as esp. on Windows
      * different Python versions can by installed in arbitrary locations, and the Python executable is even usually
-     * called the same in those locations.
+     * called the same in those locations. Return `null` if no matching Python interpreter is available.
      */
-    fun getPythonInterpreter(version: Int): String =
+    fun getPythonInterpreter(version: Int): String? =
         if (Os.isWindows) {
-            val scriptFile = File.createTempFile("python_interpreter", ".py")
-            scriptFile.writeBytes(javaClass.getResource("/scripts/python_interpreter.py").readBytes())
+            // TODO: Make analysis compatible with Python 3.10 (not only on Windows).
+            val incompatibleVersions = listOf("3.10")
 
-            try {
-                run("-$version", scriptFile.path).stdout
-            } finally {
-                if (!scriptFile.delete()) {
-                    log.warn { "Helper script file '${scriptFile.path}' could not be deleted." }
-                }
+            val installedVersions = run("--list-paths").stdout
+            val versionAndPath = installedVersions.lines().find { line ->
+                line.startsWith(" -$version") && incompatibleVersions.none { it in line }
             }
+
+            // Parse a line like " -2.7-32        C:\Python27\python.exe".
+            versionAndPath?.split(' ', limit = 3)?.last()?.trimStart()
         } else {
-            getPathFromEnvironment("python$version")?.path.orEmpty()
+            Os.getPathFromEnvironment("python$version")?.path
         }
 }
 
@@ -203,7 +199,7 @@ class Pip(
     ): ProcessCapture {
         val binDir = if (Os.isWindows) "Scripts" else "bin"
         val command = virtualEnvDir.resolve(binDir).resolve(commandName)
-        val resolvedCommand = resolveWindowsExecutable(command)?.takeIf { Os.isWindows } ?: command
+        val resolvedCommand = Os.resolveWindowsExecutable(command)?.takeIf { Os.isWindows } ?: command
 
         // TODO: Maybe work around long shebang paths in generated scripts within a virtualenv by calling the Python
         //       executable in the virtualenv directly, see https://github.com/pypa/virtualenv/issues/997.
@@ -216,7 +212,7 @@ class Pip(
         VirtualEnv.checkVersion(analyzerConfig.ignoreToolVersions)
 
     @Suppress("LongMethod")
-    override fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult> {
+    override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         // For an overview, dependency resolution involves the following steps:
         // 1. Install dependencies via pip (inside a virtualenv, for isolation from globally installed packages).
         // 2. Get metadata about the local project via pydep (only for setup.py-based projects).
@@ -232,9 +228,9 @@ class Pip(
         // Get the locally available metadata for all installed packages as a fallback.
         val installedPackages = getInstalledPackagesWithLocalMetaData(virtualEnvDir, workingDir).associateBy { it.id }
 
-        // Install pydep after running any other command but before looking at the dependencies because it
-        // downgrades pip to version 7.1.2. Use it to get meta-information from about the project from setup.py. As
-        // pydep is not on PyPI, install it from Git instead.
+        // Install pydep after running any other command but before looking at the dependencies because it downgrades
+        // pip to version 7.1.2. Use it to get meta-information about the project from setup.py. As pydep is not on
+        // PyPI, install it from Git instead.
         val pydepUrl = "git+https://github.com/oss-review-toolkit/pydep@$PYDEP_REVISION"
         val pip = if (Os.isWindows) {
             // On Windows, in-place pip up- / downgrades require pip to be wrapped by "python -m", see
@@ -459,7 +455,7 @@ class Pip(
         log.info { "Trying to install dependencies using Python $projectPythonVersion..." }
 
         var virtualEnvDir = createVirtualEnv(workingDir, projectPythonVersion)
-        var install = installDependencies(workingDir, definitionFile, virtualEnvDir)
+        val install = installDependencies(workingDir, definitionFile, virtualEnvDir)
 
         if (install.isError) {
             log.debug {
@@ -478,12 +474,7 @@ class Pip(
             log.info { "Falling back to trying to install dependencies using Python $projectPythonVersion..." }
 
             virtualEnvDir = createVirtualEnv(workingDir, projectPythonVersion)
-            install = installDependencies(workingDir, definitionFile, virtualEnvDir)
-
-            if (install.isError) {
-                // pip writes the real error message to stdout instead of stderr.
-                throw IOException(install.stdout)
-            }
+            installDependencies(workingDir, definitionFile, virtualEnvDir).requireSuccess()
         }
 
         log.info {
@@ -495,8 +486,10 @@ class Pip(
 
     private fun createVirtualEnv(workingDir: File, pythonVersion: Int): File {
         val virtualEnvDir = createTempDirectory("$ORT_NAME-${workingDir.name}-virtualenv").toFile()
+        val pythonInterpreter = requireNotNull(PythonVersion.getPythonInterpreter(pythonVersion)) {
+            "No Python interpreter found for version $pythonVersion."
+        }
 
-        val pythonInterpreter = PythonVersion.getPythonInterpreter(pythonVersion)
         ProcessCapture(workingDir, "virtualenv", virtualEnvDir.path, "-p", pythonInterpreter).requireSuccess()
 
         return virtualEnvDir
@@ -541,9 +534,7 @@ class Pip(
         // TODO: Consider logging a warning instead of an error if the command is run on a file that likely belongs to
         //       a test.
         with(pip) {
-            if (isError) {
-                log.error { errorMessage }
-            }
+            if (isError) log.error { errorMessage }
         }
 
         return pip
@@ -677,19 +668,37 @@ class Pip(
             }
         }
 
+        val id = Identifier(
+            type = "PyPI",
+            namespace = "",
+            name = map.getValue("Name").single().normalizePackageName(),
+            version = map.getValue("Version").single()
+        )
+
         val declaredLicenses = sortedSetOf<String>()
-        getLicenseFromLicenseField(map["License"]?.single())?.let { declaredLicenses += it }
+
+        map["License"]?.let { licenseShortString ->
+            getLicenseFromLicenseField(licenseShortString.firstOrNull())?.let { declaredLicenses += it }
+
+            val moreLines = licenseShortString.drop(1)
+            if (moreLines.isNotEmpty()) {
+                log.warn {
+                    "The 'License' field of package '${id.toCoordinates()}' is supposed to be a short string but it " +
+                            "contains the following additional lines which will be ignored:"
+                }
+
+                moreLines.forEach { line ->
+                    log.warn { line }
+                }
+            }
+        }
+
         map["Classifiers"]?.mapNotNullTo(declaredLicenses) { getLicenseFromClassifier(it) }
 
         val authors = parseAuthorString(map["Author"]?.singleOrNull())
 
         return Package(
-            id = Identifier(
-                type = "PyPI",
-                namespace = "",
-                name = map.getValue("Name").single().normalizePackageName(),
-                version = map.getValue("Version").single()
-            ),
+            id = id,
             description = map["Summary"]?.single().orEmpty(),
             homepageUrl = map["Home-page"]?.single().orEmpty(),
             authors = authors,

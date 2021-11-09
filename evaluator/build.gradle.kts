@@ -28,7 +28,7 @@ plugins {
 dependencies {
     api(project(":model"))
 
-    implementation(project(":utils"))
+    implementation(project(":utils:core-utils"))
 
     testImplementation("io.mockk:mockk:$mockkVersion")
 }

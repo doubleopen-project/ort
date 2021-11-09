@@ -35,7 +35,7 @@ import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.config.ScopeExclude
 import org.ossreviewtoolkit.model.config.ScopeExcludeReason
 import org.ossreviewtoolkit.model.readValue
-import org.ossreviewtoolkit.utils.expandTilde
+import org.ossreviewtoolkit.utils.common.expandTilde
 
 internal class GenerateScopeExcludesCommand : CliktCommand(
     help = "Generate scope excludes based on common default for the package managers. The output is written to the " +
@@ -150,6 +150,11 @@ private fun getScopeExcludesForPackageManager(packageManagerName: String): List<
             ),
             ScopeExclude(
                 pattern = "jacocoAnt",
+                reason = ScopeExcludeReason.TEST_DEPENDENCY_OF,
+                comment = "Packages for code coverage (testing) only."
+            ),
+            ScopeExclude(
+                pattern = ".*JacocoAnt",
                 reason = ScopeExcludeReason.TEST_DEPENDENCY_OF,
                 comment = "Packages for code coverage (testing) only."
             ),

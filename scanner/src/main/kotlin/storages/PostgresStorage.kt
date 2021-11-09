@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.DatabaseConfig
 import org.jetbrains.exposed.sql.SchemaUtils.createMissingTablesAndColumns
 import org.jetbrains.exposed.sql.SchemaUtils.withDataBaseLock
 import org.jetbrains.exposed.sql.Transaction
@@ -54,9 +55,9 @@ import org.ossreviewtoolkit.scanner.ScanResultsStorage
 import org.ossreviewtoolkit.scanner.ScannerCriteria
 import org.ossreviewtoolkit.scanner.storages.utils.ScanResultDao
 import org.ossreviewtoolkit.scanner.storages.utils.ScanResults
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.showStackTrace
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 private val TABLE_NAME = ScanResults.tableName
 
@@ -85,9 +86,7 @@ class PostgresStorage(
      * Setup the database.
      */
     private fun setupDatabase(): Database =
-        Database.connect(dataSource).apply {
-            defaultFetchSize(1000)
-
+        Database.connect(dataSource, databaseConfig = DatabaseConfig { defaultFetchSize = 1000 }).apply {
             transaction {
                 withDataBaseLock {
                     if (!tableExists(TABLE_NAME)) {
@@ -96,6 +95,7 @@ class PostgresStorage(
                         createMissingTablesAndColumns(ScanResults)
 
                         createIdentifierAndScannerVersionIndex()
+                        createScanResultUniqueIndex()
                     }
                 }
             }
@@ -110,6 +110,23 @@ class PostgresStorage(
                     identifier,
                     (scan_result->'scanner'->>'name'),
                     $VERSION_ARRAY
+                )
+                TABLESPACE pg_default
+            """.trimIndent()
+        )
+
+    /**
+     * Create an index that ensures that there is only one scan result for the same identifier, scanner, and provenance.
+     */
+    private fun Transaction.createScanResultUniqueIndex() =
+        exec(
+            """
+            CREATE UNIQUE INDEX scan_result_unique_index
+                ON $TABLE_NAME USING btree
+                (
+                    identifier,
+                    (scan_result->'provenance'),
+                    (scan_result->'scanner')
                 )
                 TABLESPACE pg_default
             """.trimIndent()

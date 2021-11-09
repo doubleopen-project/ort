@@ -20,8 +20,8 @@ project:
     dependencies:
     - id: "PyPI::django:2.2.20"
       dependencies:
-      - id: "PyPI::pytz:2021.1"
-      - id: "PyPI::sqlparse:0.4.1"
+      - id: "PyPI::pytz:2021.3"
+      - id: "PyPI::sqlparse:0.4.2"
 packages:
 - id: "PyPI::django:2.2.20"
   purl: "pkg:pypi/django@2.2.20"
@@ -59,8 +59,8 @@ packages:
     url: ""
     revision: ""
     path: ""
-- id: "PyPI::pytz:2021.1"
-  purl: "pkg:pypi/pytz@2021.1"
+- id: "PyPI::pytz:2021.3"
+  purl: "pkg:pypi/pytz@2021.3"
   authors:
   - "Stuart Bishop"
   declared_licenses:
@@ -73,14 +73,14 @@ packages:
   description: "World timezone definitions, modern and historical"
   homepage_url: "http://pythonhosted.org/pytz"
   binary_artifact:
-    url: "https://files.pythonhosted.org/packages/70/94/784178ca5dd892a98f113cdd923372024dc04b8d40abe77ca76b5fb90ca6/pytz-2021.1-py2.py3-none-any.whl"
+    url: "https://files.pythonhosted.org/packages/d3/e3/d9f046b5d1c94a3aeab15f1f867aa414f8ee9d196fae6865f1d6a0ee1a0b/pytz-2021.3-py2.py3-none-any.whl"
     hash:
-      value: "2e039ef05cc965ffe161b3a8af018431"
+      value: "bb7a678de7844478ea3af79f20b3242e"
       algorithm: "MD5"
   source_artifact:
-    url: "https://files.pythonhosted.org/packages/b0/61/eddc6eb2c682ea6fd97a7e1018a6294be80dba08fa28e7a3570148b4612d/pytz-2021.1.tar.gz"
+    url: "https://files.pythonhosted.org/packages/e3/8e/1cde9d002f48a940b9d9d38820aaf444b229450c0854bdf15305ce4a3d1a/pytz-2021.3.tar.gz"
     hash:
-      value: "8c849bdf95414fe708a84473e42d4406"
+      value: "d7b7060bbac4970afa2050c139c9fcb6"
       algorithm: "MD5"
   vcs:
     type: ""
@@ -92,8 +92,8 @@ packages:
     url: ""
     revision: ""
     path: ""
-- id: "PyPI::sqlparse:0.4.1"
-  purl: "pkg:pypi/sqlparse@0.4.1"
+- id: "PyPI::sqlparse:0.4.2"
+  purl: "pkg:pypi/sqlparse@0.4.2"
   authors:
   - "Andi Albrecht"
   declared_licenses:
@@ -106,14 +106,14 @@ packages:
   description: "A non-validating SQL parser."
   homepage_url: "https://github.com/andialbrecht/sqlparse"
   binary_artifact:
-    url: "https://files.pythonhosted.org/packages/14/05/6e8eb62ca685b10e34051a80d7ea94b7137369d8c0be5c3b9d9b6e3f5dae/sqlparse-0.4.1-py3-none-any.whl"
+    url: "https://files.pythonhosted.org/packages/05/40/d836d55fb3f467243ee839ab7b814822fda522cd395fa41e282684e71ee5/sqlparse-0.4.2-py3-none-any.whl"
     hash:
-      value: "8e8e7586f9dc6c75ed613f823367eb17"
+      value: "7ba95d1ee3802ec2bb6b88d04e06fbfd"
       algorithm: "MD5"
   source_artifact:
-    url: "https://files.pythonhosted.org/packages/a2/54/da10f9a0235681179144a5ca02147428f955745e9393f859dec8d0d05b41/sqlparse-0.4.1.tar.gz"
+    url: "https://files.pythonhosted.org/packages/32/fe/8a8575debfd924c8160295686a7ea661107fc34d831429cce212b6442edb/sqlparse-0.4.2.tar.gz"
     hash:
-      value: "eebbc6b5f1033054873033e54b0c1266"
+      value: "66dce30d92823589f5e5e043f90b4f16"
       algorithm: "MD5"
   vcs:
     type: ""

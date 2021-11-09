@@ -26,8 +26,8 @@ import java.nio.file.Paths
 
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
-import org.ossreviewtoolkit.utils.normalizeVcsUrl
-import org.ossreviewtoolkit.utils.toUri
+import org.ossreviewtoolkit.utils.common.toUri
+import org.ossreviewtoolkit.utils.core.normalizeVcsUrl
 
 /**
  * An enum to handle VCS-host-specific information.
@@ -185,13 +185,8 @@ enum class VcsHost(
             // Append the first two path components that denote the user and project to the base URL.
             val pathIterator = Paths.get(projectUrl.path).iterator()
 
-            if (pathIterator.hasNext()) {
-                url += "/${pathIterator.next()}"
-            }
-
-            if (pathIterator.hasNext()) {
-                url += "/${pathIterator.next()}"
-            }
+            if (pathIterator.hasNext()) url += "/${pathIterator.next()}"
+            if (pathIterator.hasNext()) url += "/${pathIterator.next()}"
 
             var revision = ""
             var path = ""
@@ -450,9 +445,7 @@ private fun gitProjectUrlToVcsInfo(projectUrl: URI, pathParser: (String, Iterato
     if (pathIterator.hasNext()) {
         baseUrl += "/${pathIterator.next()}"
 
-        if (!baseUrl.endsWith(".git")) {
-            baseUrl += ".git"
-        }
+        if (!baseUrl.endsWith(".git")) baseUrl += ".git"
     }
 
     return pathParser(baseUrl, pathIterator)

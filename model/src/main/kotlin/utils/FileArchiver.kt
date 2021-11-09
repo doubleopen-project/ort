@@ -27,16 +27,16 @@ import kotlin.time.measureTime
 import kotlin.time.measureTimedValue
 
 import org.ossreviewtoolkit.model.KnownProvenance
-import org.ossreviewtoolkit.utils.FileMatcher
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.ortDataDirectory
-import org.ossreviewtoolkit.utils.packZip
-import org.ossreviewtoolkit.utils.perf
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.storage.FileStorage
-import org.ossreviewtoolkit.utils.unpackZip
+import org.ossreviewtoolkit.utils.common.FileMatcher
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.packZip
+import org.ossreviewtoolkit.utils.common.unpackZip
+import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.ortDataDirectory
+import org.ossreviewtoolkit.utils.core.perf
+import org.ossreviewtoolkit.utils.core.showStackTrace
+import org.ossreviewtoolkit.utils.core.storage.FileStorage
 
 /**
  * A class to archive files matched by provided patterns in a ZIP file that is stored in a [FileStorage][storage].
@@ -103,14 +103,13 @@ class FileArchiver(
         }
 
         log.perf {
-            "Archived directory '${directory.invariantSeparatorsPath}' in ${zipDuration.inWholeMilliseconds}ms."
+            "Archived directory '${directory.invariantSeparatorsPath}' in $zipDuration."
         }
 
         val writeDuration = measureTime { storage.addArchive(provenance, zipFile) }
 
         log.perf {
-            "Wrote archive of directory '${directory.invariantSeparatorsPath}' to storage in " +
-                    "${writeDuration.inWholeMilliseconds}ms."
+            "Wrote archive of directory '${directory.invariantSeparatorsPath}' to storage in $writeDuration."
         }
 
         zipFile.delete()
@@ -123,8 +122,7 @@ class FileArchiver(
         val (zipFile, readDuration) = measureTimedValue { storage.getArchive(provenance) }
 
         log.perf {
-            "Read archive of directory '${directory.invariantSeparatorsPath}' from storage in " +
-                    "${readDuration.inWholeMilliseconds}ms."
+            "Read archive of directory '${directory.invariantSeparatorsPath}' from storage in $readDuration."
         }
 
         if (zipFile == null) return false
@@ -133,7 +131,7 @@ class FileArchiver(
             val unzipDuration = measureTime { zipFile.inputStream().use { it.unpackZip(directory) } }
 
             log.perf {
-                "Unarchived directory '${directory.invariantSeparatorsPath}' in ${unzipDuration.inWholeMilliseconds}ms."
+                "Unarchived directory '${directory.invariantSeparatorsPath}' in $unzipDuration."
             }
 
             true

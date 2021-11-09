@@ -24,9 +24,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.haveSize
+import io.kotest.matchers.collections.shouldBeIn
+import io.kotest.matchers.file.beRelative
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,13 +41,13 @@ import org.ossreviewtoolkit.model.CopyrightFinding
 import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.readJsonFile
-import org.ossreviewtoolkit.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
 
 @Suppress("LargeClass")
 class ScanCodeResultParserTest : WordSpec({
     "ScanCode 2 results" should {
         "be correctly summarized" {
-            val resultFile = File("src/test/assets/mime-types-2.1.18_scancode-2.9.7.json")
+            val resultFile = File("src/test/assets/scancode-2.9.7_mime-types-2.1.18.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -57,7 +60,7 @@ class ScanCodeResultParserTest : WordSpec({
 
     "ScanCode 3 results" should {
         "be correctly summarized" {
-            val resultFile = File("src/test/assets/mime-types-2.1.18_scancode-3.0.2.json")
+            val resultFile = File("src/test/assets/scancode-3.0.2_mime-types-2.1.18.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -71,7 +74,7 @@ class ScanCodeResultParserTest : WordSpec({
     "generateSummary()" should {
         "properly summarize the license findings for ScanCode 2.2.1" {
             // TODO: minimize this test case.
-            val resultFile = File("src/test/assets/esprima-2.7.3_scancode-2.2.1.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -388,27 +391,9 @@ class ScanCodeResultParserTest : WordSpec({
             )
         }
 
-        "properly parse license expressions for ScanCode 3.2.1" {
-            val resultFile = File("src/test/assets/h2database-1.4.200_scancode-3.2.1.json")
-            val result = readJsonFile(resultFile)
-
-            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
-
-            summary.licenseFindings should containExactlyInAnyOrder(
-                LicenseFinding(
-                    license = "(MPL-2.0 OR EPL-1.0) AND LicenseRef-scancode-proprietary-license",
-                    location = TextLocation("h2/src/main/org/h2/table/Column.java", 2, 3)
-                ),
-                LicenseFinding(
-                    license = "LicenseRef-scancode-public-domain",
-                    location = TextLocation("h2/src/main/org/h2/table/Column.java", 317)
-                )
-            )
-        }
-
         "properly summarize the copyright findings for ScanCode 2.2.1" {
             // TODO: minimize this test case
-            val resultFile = File("src/test/assets/esprima-2.7.3_scancode-2.2.1.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -568,7 +553,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "properly summarize license findings for ScanCode 2.9.7" {
-            val resultFile = File("src/test/assets/aws-java-sdk-core-1.11.160_scancode-2.9.7.json")
+            val resultFile = File("src/test/assets/scancode-2.9.7_aws-java-sdk-core-1.11.160.json")
             val result = readJsonFile(resultFile)
 
             val actualFindings = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -591,7 +576,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "properly summarize copyright findings for ScanCode 2.9.7" {
-            val resultFile = File("src/test/assets/aws-java-sdk-core-1.11.160_scancode-2.9.7.json")
+            val resultFile = File("src/test/assets/scancode-2.9.7_aws-java-sdk-core-1.11.160.json")
             val result = readJsonFile(resultFile)
 
             val actualFindings = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -615,11 +600,43 @@ class ScanCodeResultParserTest : WordSpec({
                 "Portions copyright 2006-2009 James Murty."
             )
         }
+
+        "properly parse license expressions for ScanCode 3.2.1" {
+            val resultFile = File("src/test/assets/scancode-3.2.1_h2database-1.4.200.json")
+            val result = readJsonFile(resultFile)
+
+            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
+
+            summary.licenseFindings should containExactlyInAnyOrder(
+                LicenseFinding(
+                    license = "(MPL-2.0 OR EPL-1.0) AND LicenseRef-scancode-proprietary-license",
+                    location = TextLocation("h2/src/main/org/h2/table/Column.java", 2, 3)
+                ),
+                LicenseFinding(
+                    license = "LicenseRef-scancode-public-domain",
+                    location = TextLocation("h2/src/main/org/h2/table/Column.java", 317)
+                )
+            )
+        }
+
+        "properly parse absolute paths" {
+            val resultFile = File("src/test/assets/scancode-3.2.1rc2_spring-javaformat-checkstyle-0.0.15.json")
+            val result = readJsonFile(resultFile)
+
+            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
+            val fileExtensions = listOf("html", "java", "txt")
+
+            summary.licenseFindings.forAll {
+                val file = File(it.location.path)
+                file should beRelative()
+                file.extension shouldBeIn fileExtensions
+            }
+        }
     }
 
-    "generateDetails" should {
+    "generateDetails()" should {
         "parse a ScanCode 2.9.x result file" {
-            val result = readJsonFile(File("src/test/assets/mime-types-2.1.18_scancode-2.9.7.json"))
+            val result = readJsonFile(File("src/test/assets/scancode-2.9.7_mime-types-2.1.18.json"))
 
             val details = generateScannerDetails(result)
             details.name shouldBe ScanCode.SCANNER_NAME
@@ -631,7 +648,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "parse a ScanCode 3.x result file" {
-            val result = readJsonFile(File("src/test/assets/mime-types-2.1.18_scancode-3.0.2.json"))
+            val result = readJsonFile(File("src/test/assets/scancode-3.0.2_mime-types-2.1.18.json"))
 
             val details = generateScannerDetails(result)
             details.name shouldBe ScanCode.SCANNER_NAME
@@ -641,7 +658,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "handle missing option properties gracefully" {
-            val result = readJsonFile(File("src/test/assets/mime-types-2.1.18_scancode-3.0.2.json"))
+            val result = readJsonFile(File("src/test/assets/scancode-3.0.2_mime-types-2.1.18.json"))
             val headers = result["headers"] as ArrayNode
             val headerObj = headers[0] as ObjectNode
             headerObj.remove("options")
@@ -652,7 +669,7 @@ class ScanCodeResultParserTest : WordSpec({
 
         "handle missing scanner version property gracefully" {
             val result =
-                readJsonFile(File("src/test/assets/mime-types-2.1.18_scancode-2.9.7.json")) as ObjectNode
+                readJsonFile(File("src/test/assets/scancode-2.9.7_mime-types-2.1.18.json")) as ObjectNode
             result.remove("scancode_version")
 
             val details = generateScannerDetails(result)
@@ -662,7 +679,7 @@ class ScanCodeResultParserTest : WordSpec({
 
     "mapTimeoutErrors()" should {
         "return true for scan results with only timeout errors" {
-            val resultFile = File("src/test/assets/esprima-2.7.3_scancode-2.2.1.post277.4d68f9377.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1.post277.4d68f9377_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -700,7 +717,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "return false for scan results without errors" {
-            val resultFile = File("src/test/assets/esprima-2.7.3_scancode-2.2.1.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -711,7 +728,7 @@ class ScanCodeResultParserTest : WordSpec({
 
     "mapUnknownErrors()" should {
         "return true for scan results with only memory errors" {
-            val resultFile = File("src/test/assets/very-long-json-lines_scancode-2.2.1.post277.4d68f9377.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1.post277.4d68f9377_very-long-json-lines.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -725,7 +742,8 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "return false for scan results with other unknown errors" {
-            val resultFile = File("src/test/assets/kotlin-annotation-processing-gradle-1.2.21_scancode.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1.post277.4d68f9377_" +
+                    "kotlin-annotation-processing-gradle-1.2.21.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -740,7 +758,7 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "return false for scan results without errors" {
-            val resultFile = File("src/test/assets/esprima-2.7.3_scancode-2.2.1.json")
+            val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)

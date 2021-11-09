@@ -33,11 +33,10 @@ import org.ossreviewtoolkit.downloader.vcs.GitRepo
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
-import org.ossreviewtoolkit.utils.Ci
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.test.Ci
 import org.ossreviewtoolkit.utils.test.DEFAULT_ANALYZER_CONFIGURATION
-import org.ossreviewtoolkit.utils.test.convertToDependencyGraph
 import org.ossreviewtoolkit.utils.test.patchActualResult
 import org.ossreviewtoolkit.utils.test.patchExpectedResult
 
@@ -66,14 +65,15 @@ class GitRepoFunTest : StringSpec() {
     init {
         // Disabled on Azure Windows because it fails for unknown reasons.
         "Analyzer correctly reports VcsInfo for git-repo projects".config(enabled = !Ci.isAzureWindows) {
-            val ortResult = Analyzer(DEFAULT_ANALYZER_CONFIGURATION).analyze(outputDir)
+            val ortResult = Analyzer(DEFAULT_ANALYZER_CONFIGURATION).run {
+                analyze(findManagedFiles(outputDir))
+            }
+
             val actualResult = ortResult.withResolvedScopes().toYaml()
-            val expectedResult = convertToDependencyGraph(
-                patchExpectedResult(
-                    File("src/funTest/assets/projects/external/git-repo-expected-output.yml"),
-                    revision = REPO_REV,
-                    path = outputDir.invariantSeparatorsPath
-                )
+            val expectedResult = patchExpectedResult(
+                File("src/funTest/assets/projects/external/git-repo-expected-output.yml"),
+                revision = REPO_REV,
+                path = outputDir.invariantSeparatorsPath
             )
 
             patchActualResult(actualResult, patchStartAndEndTime = true) shouldBe expectedResult

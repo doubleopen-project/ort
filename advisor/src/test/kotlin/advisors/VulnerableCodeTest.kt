@@ -21,8 +21,8 @@
 package org.ossreviewtoolkit.advisor.advisors
 
 import com.github.tomakehurst.wiremock.WireMockServer
-import com.github.tomakehurst.wiremock.client.WireMock
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
+import com.github.tomakehurst.wiremock.client.WireMock.configureFor
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
@@ -41,8 +41,6 @@ import io.kotest.matchers.shouldBe
 
 import java.io.File
 import java.net.URI
-
-import kotlinx.coroutines.runBlocking
 
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.OrtResult
@@ -64,7 +62,7 @@ class VulnerableCodeTest : WordSpec({
 
     beforeSpec {
         wiremock.start()
-        WireMock.configureFor(wiremock.port())
+        configureFor(wiremock.port())
     }
 
     afterSpec {
@@ -81,7 +79,7 @@ class VulnerableCodeTest : WordSpec({
             val vulnerableCode = createVulnerableCode(wiremock)
             val packagesToAdvise = inputPackages()
 
-            val result = vulnerableCode.retrievePackageVulnerabilities(packagesToAdvise).mapKeys { it.key.id }
+            val result = vulnerableCode.retrievePackageFindings(packagesToAdvise).mapKeys { it.key.id }
 
             result.shouldNotBeEmpty()
             result.keys should containExactlyInAnyOrder(idLang, idStruts)
@@ -152,8 +150,24 @@ class VulnerableCodeTest : WordSpec({
                         aResponse().withStatus(500)
                     )
             )
+            val vulnerableCode = createVulnerableCode(wiremock)
+            val packagesToAdvise = inputPackages()
 
-            expectErrorResult(wiremock)
+            val result = vulnerableCode.retrievePackageFindings(packagesToAdvise).mapKeys { it.key.id }
+
+            result shouldNotBeNull {
+                keys should containExactly(packageIdentifiers)
+
+                packageIdentifiers.forEach { pkg ->
+                    val pkgResults = getValue(pkg)
+                    pkgResults shouldHaveSize 1
+                    val pkgResult = pkgResults[0]
+                    pkgResult.vulnerabilities should beEmpty()
+                    pkgResult.summary.issues shouldHaveSize 1
+                    val issue = pkgResult.summary.issues[0]
+                    issue.severity shouldBe Severity.ERROR
+                }
+            }
         }
 
         "filter out packages without vulnerabilities" {
@@ -161,7 +175,7 @@ class VulnerableCodeTest : WordSpec({
             val vulnerableCode = createVulnerableCode(wiremock)
             val packagesToAdvise = inputPackages()
 
-            val result = vulnerableCode.retrievePackageVulnerabilities(packagesToAdvise).mapKeys { it.key.id }
+            val result = vulnerableCode.retrievePackageFindings(packagesToAdvise).mapKeys { it.key.id }
 
             result.keys should containExactly(idStruts)
         }
@@ -171,7 +185,7 @@ class VulnerableCodeTest : WordSpec({
             val vulnerableCode = createVulnerableCode(wiremock)
             val packagesToAdvise = inputPackages()
 
-            val result = vulnerableCode.retrievePackageVulnerabilities(packagesToAdvise).mapKeys { it.key.id }
+            val result = vulnerableCode.retrievePackageFindings(packagesToAdvise).mapKeys { it.key.id }
 
             result.keys should containExactlyInAnyOrder(idLang, idStruts)
         }
@@ -179,7 +193,8 @@ class VulnerableCodeTest : WordSpec({
 })
 
 private const val ADVISOR_NAME = "VulnerableCodeTestAdvisor"
-private const val TEST_FILES_ROOT = "src/test/assets/"
+private const val TEST_FILES_ROOT = "src/test/assets"
+private const val TEST_FILES_DIRECTORY = "vulnerable-code"
 private const val TEST_RESULT_NAME = "ort-analyzer-result.yml"
 
 private val idLang = Identifier("Maven:org.apache.commons:commons-lang3:3.5")
@@ -213,36 +228,9 @@ private fun WireMockServer.stubPackagesRequest(responseFile: String) {
             .withHeader("Content-Type", equalTo("application/json; charset=UTF-8"))
             .willReturn(
                 aResponse().withStatus(200)
-                    .withBodyFile(responseFile)
+                    .withBodyFile("$TEST_FILES_DIRECTORY/$responseFile")
             )
     )
-}
-
-/**
- * Run a test with the VulnerabilityCode provider against the given [test server][wiremock] and expect the
- * operation to fail. In this case, for all packages a result with an error issue should have been created.
- */
-private fun expectErrorResult(wiremock: WireMockServer) {
-    val vulnerableCode = createVulnerableCode(wiremock)
-    val packagesToAdvise = inputPackages()
-
-    val result = runBlocking {
-        vulnerableCode.retrievePackageVulnerabilities(packagesToAdvise).mapKeys { it.key.id }
-    }
-
-    result shouldNotBeNull {
-        keys should containExactly(packageIdentifiers)
-
-        packageIdentifiers.forEach { pkg ->
-            val pkgResults = getValue(pkg)
-            pkgResults shouldHaveSize 1
-            val pkgResult = pkgResults[0]
-            pkgResult.vulnerabilities should beEmpty()
-            pkgResult.summary.issues shouldHaveSize 1
-            val issue = pkgResult.summary.issues[0]
-            issue.severity shouldBe Severity.ERROR
-        }
-    }
 }
 
 /**

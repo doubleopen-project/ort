@@ -61,11 +61,11 @@ import org.ossreviewtoolkit.model.config.ScannerOptions
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.scanner.AbstractScannerFactory
 import org.ossreviewtoolkit.scanner.RemoteScanner
-import org.ossreviewtoolkit.spdx.enumSetOf
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.replaceCredentialsInUri
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.toUri
+import org.ossreviewtoolkit.utils.common.enumSetOf
+import org.ossreviewtoolkit.utils.common.replaceCredentialsInUri
+import org.ossreviewtoolkit.utils.common.toUri
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 /**
  * A wrapper for [FossID](https://fossid.com/).
@@ -86,7 +86,7 @@ class FossId internal constructor(
 
     companion object {
         @JvmStatic
-        private val PROJECT_NAME_REGEX = Regex("""^.*\/([\w.\-]+)(?:\.git)?$""")
+        private val PROJECT_NAME_REGEX = Regex("""^.*\/([\w.\-]+?)(?:\.git)?$""")
 
         @JvmStatic
         private val GIT_FETCH_DONE_REGEX = Regex("-> FETCH_HEAD(?: Already up to date.)*$")
@@ -208,8 +208,9 @@ class FossId internal constructor(
         }
 
     override suspend fun scanPackages(
-        packages: Collection<Package>,
-        outputDirectory: File
+        packages: Set<Package>,
+        outputDirectory: File,
+        labels: Map<String, String>
     ): Map<Package, List<ScanResult>> {
         val (results, duration) = measureTimedValue {
             val results = mutableMapOf<Package, MutableList<ScanResult>>()
@@ -370,7 +371,7 @@ class FossId internal constructor(
             when (response.data?.status) {
                 ScanStatus.FINISHED -> true
 
-                null, ScanStatus.NOT_STARTED, ScanStatus.INTERRUPTED, ScanStatus.NEW -> false
+                null, ScanStatus.NOT_STARTED, ScanStatus.INTERRUPTED, ScanStatus.NEW, ScanStatus.FAILED -> false
 
                 ScanStatus.STARTED, ScanStatus.STARTING, ScanStatus.RUNNING, ScanStatus.SCANNING, ScanStatus.AUTO_ID,
 
@@ -458,7 +459,7 @@ class FossId internal constructor(
             .checkResponse("download data from Git", false)
 
         if (existingScan == null) {
-            checkScan(scanCode)
+            if (config.waitForResult) checkScan(scanCode)
         } else {
             val existingScanCode = requireNotNull(existingScan.code) {
                 "The code for an existing scan must not be null."
@@ -534,6 +535,10 @@ class FossId internal constructor(
         val response = service.checkScanStatus(config.user, config.apiKey, scanCode)
             .checkResponse("check scan status", false)
 
+        if (response.data?.status == ScanStatus.FAILED) {
+            throw IllegalStateException("Triggered scan has failed.")
+        }
+
         if (response.data?.status in SCAN_STATE_FOR_TRIGGER) {
             log.info { "Triggering scan as it has not yet been started." }
 
@@ -601,17 +606,18 @@ class FossId internal constructor(
             val response = service.checkScanStatus(config.user, config.apiKey, scanCode)
                 .checkResponse("check scan status", false)
 
-            response.data?.let {
-                if (it.status == ScanStatus.FINISHED) {
-                    true
-                } else {
+            when (response.data?.status) {
+                ScanStatus.FINISHED -> true
+                ScanStatus.FAILED -> throw IllegalStateException("Scan waited for has failed.")
+                null -> false
+                else -> {
                     FossId.log.info {
                         "Scan status for scan '$scanCode' is '${response.data?.status}'. Waiting..."
                     }
 
                     false
                 }
-            } ?: false
+            }
         }
 
         requireNotNull(result) { "Timeout while waiting for the scan to complete" }
@@ -678,7 +684,7 @@ class FossId internal constructor(
             copyrightFindings = copyrightFindings.toSortedSet(),
             // TODO: Maybe get issues from FossId (see has_failed_scan_files, get_failed_files and maybe get_scan_log).
             issues = rawResults.listPendingFiles.map {
-                OrtIssue(source = it, message = "pending", severity = Severity.HINT)
+                OrtIssue(source = scannerName, message = "Pending identification for '$it'.", severity = Severity.HINT)
             }
         )
 

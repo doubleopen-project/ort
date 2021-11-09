@@ -33,7 +33,7 @@ import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.VcsInfoCurationData
-import org.ossreviewtoolkit.utils.percentEncode
+import org.ossreviewtoolkit.utils.common.percentEncode
 
 internal fun TextLocation.prependPath(prefix: String): String =
     if (prefix.isBlank()) path else "${prefix.removeSuffix("/")}/$path"
@@ -208,3 +208,9 @@ fun List<ScanResult>.filterByProject(project: Project): List<ScanResult> {
         }
     }
 }
+
+/**
+ * Messages are not rendered using additional white spaces and newlines in the reports. However, resolutions are based
+ * on the messages. Therefore, characters that are not shown in the reports need to be replaced in the comparison.
+ */
+fun String.sanitizeMessage() = replace(Regex("\\s+"), " ").trim()

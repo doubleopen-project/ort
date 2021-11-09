@@ -29,9 +29,9 @@ import java.nio.file.Paths
 
 import kotlin.io.path.createTempDirectory
 
-import org.ossreviewtoolkit.analyzer.Analyzer
 import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.downloader.Downloader
+import org.ossreviewtoolkit.downloader.VersionControlSystem
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.OrtIssue
@@ -47,7 +47,6 @@ import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.VcsInfo
-import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.CopyrightGarbage
 import org.ossreviewtoolkit.model.config.Curations
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
@@ -68,15 +67,15 @@ import org.ossreviewtoolkit.model.utils.SimplePackageConfigurationProvider
 import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
 import org.ossreviewtoolkit.model.writeValue
 import org.ossreviewtoolkit.model.yamlMapper
-import org.ossreviewtoolkit.spdx.SpdxExpression
-import org.ossreviewtoolkit.spdx.SpdxSingleLicenseExpression
-import org.ossreviewtoolkit.utils.CopyrightStatementsProcessor
-import org.ossreviewtoolkit.utils.encodeOrUnknown
-import org.ossreviewtoolkit.utils.fileSystemEncode
-import org.ossreviewtoolkit.utils.isSymbolicLink
-import org.ossreviewtoolkit.utils.replaceCredentialsInUri
-import org.ossreviewtoolkit.utils.safeMkdirs
-import org.ossreviewtoolkit.utils.withoutPrefix
+import org.ossreviewtoolkit.utils.common.encodeOrUnknown
+import org.ossreviewtoolkit.utils.common.fileSystemEncode
+import org.ossreviewtoolkit.utils.common.isSymbolicLink
+import org.ossreviewtoolkit.utils.common.replaceCredentialsInUri
+import org.ossreviewtoolkit.utils.common.safeMkdirs
+import org.ossreviewtoolkit.utils.common.withoutPrefix
+import org.ossreviewtoolkit.utils.core.CopyrightStatementsProcessor
+import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
 
 const val ORTH_NAME = "orth"
 
@@ -121,10 +120,11 @@ internal fun findRepositoryPaths(directory: File): Map<String, Set<String>> {
 internal fun findRepositories(directory: File): Map<String, VcsInfo> {
     require(directory.isDirectory)
 
-    val analyzer = Analyzer(AnalyzerConfiguration(ignoreToolVersions = true, allowDynamicVersions = true))
-    val ortResult = analyzer.analyze(absoluteProjectPath = directory, packageManagers = emptyList())
-
-    return ortResult.repository.nestedRepositories
+    val workingTree = VersionControlSystem.forDirectory(directory)
+    return workingTree?.getNested()?.filter { (path, _) ->
+        // Only include nested VCS if they are part of the analyzed directory.
+        workingTree.getRootPath().resolve(path).startsWith(directory)
+    }.orEmpty()
 }
 
 /**
@@ -228,6 +228,7 @@ internal data class ProcessedCopyrightStatement(
 internal fun OrtResult.processAllCopyrightStatements(
     omitExcluded: Boolean = true,
     copyrightGarbage: Set<String> = emptySet(),
+    addAuthorsToCopyrights: Boolean = false,
     packageConfigurationProvider: PackageConfigurationProvider = SimplePackageConfigurationProvider.EMPTY
 ): List<ProcessedCopyrightStatement> {
     val result = mutableListOf<ProcessedCopyrightStatement>()
@@ -236,10 +237,11 @@ internal fun OrtResult.processAllCopyrightStatements(
 
     val licenseInfoResolver = createLicenseInfoResolver(
         packageConfigurationProvider = packageConfigurationProvider,
-        copyrightGarbage = CopyrightGarbage(copyrightGarbage.toSortedSet())
+        copyrightGarbage = CopyrightGarbage(copyrightGarbage.toSortedSet()),
+        addAuthorsToCopyrights = addAuthorsToCopyrights
     )
 
-    getProjectAndPackageIds().forEach { id ->
+    collectProjectsAndPackages().forEach { id ->
         licenseInfoResolver.resolveLicenseInfo(id).forEach innerForEach@{ resolvedLicense ->
             if (omitExcluded && resolvedLicense.isDetectedExcluded) return@innerForEach
 
@@ -370,9 +372,7 @@ internal fun OrtResult.getProvenance(id: Identifier): Provenance? {
 
     scanner?.results?.scanResults?.forEach { (_, results) ->
         results.forEach { scanResult ->
-            if (scanResult.provenance.matches(pkg)) {
-                return scanResult.provenance
-            }
+            if (scanResult.provenance.matches(pkg)) return scanResult.provenance
         }
     }
 
@@ -577,16 +577,12 @@ internal fun RepositoryLicenseFindingCurations.mergeLicenseFindingCurations(
     val result: MutableMap<String, MutableMap<LicenseFindingCurationKey, LicenseFindingCuration>> = mutableMapOf()
 
     fun merge(repositoryUrl: String, curation: LicenseFindingCuration, updateOnlyUpdateExisting: Boolean = false) {
-        if (updateOnlyUpdateExisting && !result.containsKey(repositoryUrl)) {
-            return
-        }
+        if (updateOnlyUpdateExisting && repositoryUrl !in result) return
 
         val curations = result.getOrPut(repositoryUrl) { mutableMapOf() }
 
         val key = curation.key()
-        if (updateOnlyUpdateExisting && !curations.containsKey(key)) {
-            return
-        }
+        if (updateOnlyUpdateExisting && key !in curations) return
 
         curations[key] = curation
     }
@@ -631,14 +627,10 @@ internal fun RepositoryPathExcludes.mergePathExcludes(
     val result: MutableMap<String, MutableMap<String, PathExclude>> = mutableMapOf()
 
     fun merge(repositoryUrl: String, pathExclude: PathExclude, updateOnlyUpdateExisting: Boolean = false) {
-        if (updateOnlyUpdateExisting && !result.containsKey(repositoryUrl)) {
-            return
-        }
+        if (updateOnlyUpdateExisting && repositoryUrl !in result) return
 
         val pathExcludes = result.getOrPut(repositoryUrl) { mutableMapOf() }
-        if (updateOnlyUpdateExisting && !result.containsKey(pathExclude.pattern)) {
-            return
-        }
+        if (updateOnlyUpdateExisting && pathExclude.pattern !in result) return
 
         pathExcludes[pathExclude.pattern] = pathExclude
     }
@@ -701,9 +693,7 @@ internal fun Collection<LicenseFindingCuration>.mergeLicenseFindingCurations(
     associateByTo(result) { it.key() }
 
     other.forEach {
-        if (!updateOnlyExisting || result.containsKey(it.key())) {
-            result[it.key()] = it
-        }
+        if (!updateOnlyExisting || it.key() in result) result[it.key()] = it
     }
 
     return result.values.toList()
@@ -744,9 +734,7 @@ internal fun Collection<PathExclude>.mergePathExcludes(
     associateByTo(result) { it.pattern }
 
     other.forEach {
-        if (!updateOnlyExisting || result.containsKey(it.pattern)) {
-            result[it.pattern] = it
-        }
+        if (!updateOnlyExisting || it.pattern in result) result[it.pattern] = it
     }
 
     return result.values.toList()

@@ -81,18 +81,20 @@ import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.yamlMapper
-import org.ossreviewtoolkit.spdx.SpdxOperator
-import org.ossreviewtoolkit.utils.DeclaredLicenseProcessor
-import org.ossreviewtoolkit.utils.DiskCache
-import org.ossreviewtoolkit.utils.ProcessedDeclaredLicense
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.installAuthenticatorAndProxySelector
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.logOnce
-import org.ossreviewtoolkit.utils.ortDataDirectory
-import org.ossreviewtoolkit.utils.searchUpwardsForSubdirectory
-import org.ossreviewtoolkit.utils.showStackTrace
-import org.ossreviewtoolkit.utils.withoutPrefix
+import org.ossreviewtoolkit.utils.common.DiskCache
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.isMavenCentralUrl
+import org.ossreviewtoolkit.utils.common.searchUpwardsForSubdirectory
+import org.ossreviewtoolkit.utils.common.withoutPrefix
+import org.ossreviewtoolkit.utils.core.DeclaredLicenseProcessor
+import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.ProcessedDeclaredLicense
+import org.ossreviewtoolkit.utils.core.installAuthenticatorAndProxySelector
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.logOnce
+import org.ossreviewtoolkit.utils.core.ortDataDirectory
+import org.ossreviewtoolkit.utils.core.showStackTrace
+import org.ossreviewtoolkit.utils.spdx.SpdxOperator
 
 fun Artifact.identifier() = "$groupId:$artifactId:$version"
 
@@ -252,12 +254,35 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
                 }
             }
         }
+
+        /**
+         * Trim the data from checksum files as it sometimes contains a path after the actual checksum.
+         */
+        private fun trimChecksumData(checksum: String) = checksum.trimStart().takeWhile { !it.isWhitespace() }
+
+        /**
+         * Return true if an artifact that has not been requested from Maven Central is also available on Maven Central
+         * but with a different hash, otherwise return false.
+         */
+        private fun isArtifactModified(artifact: Artifact, remoteArtifact: RemoteArtifact): Boolean {
+            if (remoteArtifact.url.isBlank() || isMavenCentralUrl(remoteArtifact.url)) return false
+
+            val mavenCentralUrl = with(artifact) {
+                val group = groupId.replace('.', '/')
+                val name = remoteArtifact.url.substringAfterLast('/')
+                val hash = remoteArtifact.hash.algorithm.name.lowercase()
+                "https://repo.maven.apache.org/maven2/$group/$artifactId/$version/$name.$hash"
+            }
+
+            val checksum = OkHttpClientHelper.downloadText(mavenCentralUrl).getOrNull() ?: return false
+            return !trimChecksumData(checksum).equals(remoteArtifact.hash.value, ignoreCase = true)
+        }
     }
 
     val container = createContainer()
     private val repositorySystemSession = createRepositorySystemSession(workspaceReader)
 
-    // The MavenSettingsBuilder class is deprecated but internally it uses its successor SettingsBuilder. Calling
+    // The MavenSettingsBuilder class is deprecated, but internally it uses its successor SettingsBuilder. Calling
     // MavenSettingsBuilder requires less code than calling SettingsBuilder, so use it until it is removed.
     @Suppress("DEPRECATION")
     private fun createMavenExecutionRequest(): MavenExecutionRequest {
@@ -521,9 +546,7 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
                     val task = GetTask(checksum.location)
                     transporter.get(task)
 
-                    // Sometimes the checksum file contains a path after the actual checksum, so strip everything after
-                    // the first whitespace.
-                    task.dataString.trimStart().takeWhile { !it.isWhitespace() }
+                    trimChecksumData(task.dataString)
                 } catch (e: Exception) {
                     e.showStackTrace()
 
@@ -617,6 +640,8 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             RemoteArtifact.EMPTY
         } ?: requestRemoteArtifact(artifact, repositories)
 
+        val isBinaryArtifactModified = isArtifactModified(artifact, binaryRemoteArtifact)
+
         val sourceRemoteArtifact = when {
             localProject != null -> RemoteArtifact.EMPTY
             artifact.extension == "pom" -> binaryRemoteArtifact
@@ -628,6 +653,8 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
                 requestRemoteArtifact(sourceArtifact, repositories)
             }
         }
+
+        val isSourceArtifactModified = isArtifactModified(artifact, sourceRemoteArtifact)
 
         val vcsFromPackage = parseVcsInfo(mavenProject)
         val localDirectory = localProject?.file?.parentFile?.let {
@@ -664,7 +691,8 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             sourceArtifact = sourceRemoteArtifact,
             vcs = vcsFromPackage,
             vcsProcessed = vcsProcessed,
-            isMetaDataOnly = mavenProject.packaging == "pom"
+            isMetaDataOnly = mavenProject.packaging == "pom",
+            isModified = isBinaryArtifactModified || isSourceArtifactModified
         )
     }
 

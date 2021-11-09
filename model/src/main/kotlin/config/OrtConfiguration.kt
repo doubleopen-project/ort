@@ -32,7 +32,7 @@ import com.sksamuel.hoplite.parsers.toNode
 import java.io.File
 
 import org.ossreviewtoolkit.model.Severity
-import org.ossreviewtoolkit.utils.log
+import org.ossreviewtoolkit.utils.core.log
 
 /**
  * The configuration model for all ORT components.
@@ -44,9 +44,19 @@ data class OrtConfiguration(
     val licenseFilePatterns: LicenseFilenamePatterns = LicenseFilenamePatterns.DEFAULT,
 
     /**
+     * A flag to indicate whether authors should be considered as copyright holders.
+     */
+    val addAuthorsToCopyrights: Boolean = false,
+
+    /**
      * The threshold from which on issues count as severe.
      */
     val severeIssueThreshold: Severity = Severity.WARNING,
+
+    /**
+     * The threshold from which on rule violations count as severe.
+     */
+    val severeRuleViolationThreshold: Severity = Severity.WARNING,
 
     /**
      * The configuration of the analyzer.

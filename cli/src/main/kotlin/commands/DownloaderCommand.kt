@@ -29,7 +29,6 @@ import com.github.ajalt.clikt.parameters.groups.required
 import com.github.ajalt.clikt.parameters.groups.single
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
-import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.split
@@ -61,17 +60,18 @@ import org.ossreviewtoolkit.model.licenses.LicenseView
 import org.ossreviewtoolkit.model.licenses.ResolvedLicenseInfo
 import org.ossreviewtoolkit.model.readValue
 import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
-import org.ossreviewtoolkit.spdx.model.LicenseChoice
-import org.ossreviewtoolkit.utils.ArchiveType
-import org.ossreviewtoolkit.utils.ORT_LICENSE_CLASSIFICATIONS_FILENAME
-import org.ossreviewtoolkit.utils.archive
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.encodeOrUnknown
-import org.ossreviewtoolkit.utils.expandTilde
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.ortConfigDirectory
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.showStackTrace
+import org.ossreviewtoolkit.utils.common.ArchiveType
+import org.ossreviewtoolkit.utils.common.archive
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.encodeOrUnknown
+import org.ossreviewtoolkit.utils.common.expandTilde
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.core.ORT_CONFIG_FILENAME
+import org.ossreviewtoolkit.utils.core.ORT_LICENSE_CLASSIFICATIONS_FILENAME
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.ortConfigDirectory
+import org.ossreviewtoolkit.utils.core.showStackTrace
+import org.ossreviewtoolkit.utils.spdx.model.SpdxLicenseChoice
 
 class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source code from a remote location.") {
     private val input by mutuallyExclusiveOptions(
@@ -115,7 +115,8 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
     private val licenseClassificationsFile by option(
         "--license-classifications-file",
         help = "A file containing the license classifications that are used to limit downloads if the included " +
-                "categories are specified in the 'ort.conf' file. If not specified, all packages are downloaded."
+                "categories are specified in the '$ORT_CONFIG_FILENAME' file. If not specified, all packages are " +
+                "downloaded."
     ).convert { it.expandTilde() }
         .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
         .convert { it.absoluteFile.normalize() }
@@ -130,12 +131,6 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
         .convert { it.absoluteFile.normalize() }
         .required()
         .outputGroup()
-
-    private val allowMovingRevisions by option(
-        "--allow-moving-revisions",
-        help = "Allow the download of moving revisions (like e.g. HEAD or master in Git). By default these revisions " +
-                "are forbidden because they are not pointing to a fixed revision of the source code."
-    ).flag()
 
     private val globalOptionsForSubcommands by requireObject<GlobalOptions>()
 
@@ -192,13 +187,15 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
     ).enum<DataEntity>().split(",").default(enumValues<DataEntity>().asList())
 
     override fun run() {
+        val config = globalOptionsForSubcommands.config
         val failureMessages = mutableListOf<String>()
 
         when (input) {
             is FileType -> {
                 val ortFile = (input as FileType).file
-                val ortResult = readOrtResult(ortFile)
+                println("Downloading $entities entities from ORT result file at '${ortFile.canonicalPath}'...")
 
+                val ortResult = readOrtResult(ortFile)
                 val analyzerResult = ortResult.analyzer?.result
 
                 if (analyzerResult == null) {
@@ -216,11 +213,11 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
                     }
 
                     if (DataEntity.PACKAGES in entities) {
-                        addAll(analyzerResult.packages.map { curatedPackage -> curatedPackage.pkg })
+                        addAll(analyzerResult.packages.map { it.pkg })
                     }
                 }
 
-                val includedLicenseCategories = globalOptionsForSubcommands.config.downloader.includedLicenseCategories
+                val includedLicenseCategories = config.downloader.includedLicenseCategories
 
                 val packageDownloadDirs =
                     if (includedLicenseCategories.isNotEmpty() && licenseClassificationsFile.isFile) {
@@ -245,18 +242,19 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
 
                 packageDownloadDirs.forEach { (pkg, dir) ->
                     try {
-                        Downloader(globalOptionsForSubcommands.config.downloader).download(
-                            pkg,
-                            dir,
-                            allowMovingRevisions
-                        )
+                        Downloader(config.downloader).download(pkg, dir)
 
                         if (archiveMode == ArchiveMode.ENTITY) {
                             val zipFile = outputDir.resolve("${pkg.id.toPath("-")}.zip")
 
                             log.info { "Archiving directory '$dir' to '$zipFile'." }
-                            val result = archive(dir, zipFile,
-                                "${pkg.id.name.encodeOrUnknown()}/${pkg.id.version.encodeOrUnknown()}/")
+                            val result = runCatching {
+                                archive(
+                                    dir,
+                                    zipFile,
+                                    "${pkg.id.name.encodeOrUnknown()}/${pkg.id.version.encodeOrUnknown()}/"
+                                )
+                            }
 
                             result.exceptionOrNull()?.let {
                                 log.error { "Could not archive '$dir': ${it.collectMessagesAsString()}" }
@@ -279,7 +277,7 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
                     val zipFile = outputDir.resolve("archive.zip")
 
                     log.info { "Archiving directory '$outputDir' to '$zipFile'." }
-                    val result = archive(outputDir, zipFile)
+                    val result = runCatching { archive(outputDir, zipFile) }
 
                     result.exceptionOrNull()?.let {
                         log.error { "Could not archive '$outputDir': ${it.collectMessagesAsString()}" }
@@ -303,6 +301,7 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
 
                 val dummyId = Identifier("Downloader::$projectName:")
                 val dummyPackage = if (archiveType != ArchiveType.NONE) {
+                    println("Downloading $archiveType artifact from $projectUrl...")
                     Package.EMPTY.copy(id = dummyId, sourceArtifact = RemoteArtifact.EMPTY.copy(url = projectUrl))
                 } else {
                     val vcs = VersionControlSystem.forUrl(projectUrl)
@@ -316,6 +315,7 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
                         path = vcsPath
                     )
 
+                    println("Downloading from $vcsType VCS at $projectUrl...")
                     Package.EMPTY.copy(id = dummyId, vcs = vcsInfo, vcsProcessed = vcsInfo.normalize())
                 }
 
@@ -323,25 +323,23 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
                     // Always allow moving revisions when directly downloading a single project only. This is for
                     // convenience as often the latest revision (referred to by some VCS-specific symbolic name) of a
                     // project needs to be downloaded.
-                    Downloader(globalOptionsForSubcommands.config.downloader).download(
-                        dummyPackage,
-                        outputDir,
-                        allowMovingRevisions = true
-                    )
+                    Downloader(config.downloader.copy(allowMovingRevisions = true)).download(dummyPackage, outputDir)
                 } catch (e: DownloadException) {
                     e.showStackTrace()
 
-                    val failureMessage = "Could not download '${dummyPackage.id.toCoordinates()}': " +
+                    failureMessages += "Could not download '${dummyPackage.id.toCoordinates()}': " +
                             e.collectMessagesAsString()
-                    failureMessages += failureMessage
-
-                    log.error { failureMessage }
                 }
             }
         }
 
         if (failureMessages.isNotEmpty()) {
-            log.error { "Failure summary:\n\n${failureMessages.joinToString("\n\n")}" }
+            log.error {
+                val separator = "\n--\n"
+                "The following download exception(s) occurred:" +
+                        failureMessages.joinToString(separator, prefix = separator, postfix = separator)
+            }
+
             throw ProgramResult(1)
         }
     }
@@ -354,7 +352,7 @@ class DownloaderCommand : CliktCommand(name = "download", help = "Fetch source c
         pkg: Package,
         licenseCategorizations: List<LicenseCategorization>,
         licenseInfoResolver: LicenseInfoResolver,
-        vararg licenseChoices: List<LicenseChoice>
+        vararg licenseChoices: List<SpdxLicenseChoice>
     ): Set<String> {
         val resolvedLicenseInfo = licenseInfoResolver.resolveLicenseInfo(pkg.id)
         val effectiveLicenses = resolvedLicenseInfo.effectiveLicense(

@@ -34,6 +34,7 @@ import org.apache.maven.project.ProjectBuildingException
 
 import org.ossreviewtoolkit.downloader.VcsHost
 import org.ossreviewtoolkit.downloader.VersionControlSystem
+import org.ossreviewtoolkit.model.DependencyGraph
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.ProjectAnalyzerResult
@@ -42,12 +43,13 @@ import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
-import org.ossreviewtoolkit.spdx.VCS_DIRECTORIES
-import org.ossreviewtoolkit.utils.collectMessagesAsString
-import org.ossreviewtoolkit.utils.isSymbolicLink
-import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.normalizeVcsUrl
-import org.ossreviewtoolkit.utils.showStackTrace
+import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
+import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.isSymbolicLink
+import org.ossreviewtoolkit.utils.core.ORT_CONFIG_FILENAME
+import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.normalizeVcsUrl
+import org.ossreviewtoolkit.utils.core.showStackTrace
 
 typealias ManagedProjectFiles = Map<PackageManagerFactory, List<File>>
 
@@ -68,7 +70,7 @@ abstract class PackageManager(
         /**
          * The list of all available package managers in the classpath.
          */
-        val ALL by lazy { LOADER.iterator().asSequence().toList() }
+        val ALL by lazy { LOADER.iterator().asSequence().toList().sortedBy { it.managerName } }
 
         private val PACKAGE_MANAGER_DIRECTORIES = listOf(
             // Ignore intermediate build system directories.
@@ -216,8 +218,10 @@ abstract class PackageManager(
      * Return a tree of resolved dependencies (not necessarily declared dependencies, in case conflicts were resolved)
      * for all [definitionFiles] which were found by searching the [analysisRoot] directory. By convention, the
      * [definitionFiles] must be absolute.
+     * [labels] are the labels given as parameters to the [org.ossreviewtoolkit.cli.commands.AnalyzerCommand]. They can
+     * be used by package manager implementations to decide how dependencies are resolved.
      */
-    open fun resolveDependencies(definitionFiles: List<File>): PackageManagerResult {
+    open fun resolveDependencies(definitionFiles: List<File>, labels: Map<String, String>): PackageManagerResult {
         definitionFiles.forEach { definitionFile ->
             requireNotNull(definitionFile.relativeToOrNull(analysisRoot)) {
                 "'$definitionFile' must be an absolute path below '$analysisRoot'."
@@ -236,7 +240,7 @@ abstract class PackageManager(
             val duration = measureTime {
                 @Suppress("TooGenericExceptionCaught")
                 try {
-                    result[definitionFile] = resolveDependencies(definitionFile)
+                    result[definitionFile] = resolveDependencies(definitionFile, labels)
                 } catch (e: Exception) {
                     e.showStackTrace()
 
@@ -272,14 +276,16 @@ abstract class PackageManager(
 
         afterResolution(definitionFiles)
 
-        return createPackageManagerResult(result)
+        return createPackageManagerResult(result).addDependencyGraphIfMissing()
     }
 
     /**
      * Resolve dependencies for a single absolute [definitionFile] and return a list of [ProjectAnalyzerResult]s, with
      * one result for each project found in the definition file.
+     * [labels] are the labels given as parameters to the [org.ossreviewtoolkit.cli.commands.AnalyzerCommand]. They can
+     * be used by package manager implementations to decide how dependencies are resolved.
      */
-    abstract fun resolveDependencies(definitionFile: File): List<ProjectAnalyzerResult>
+    abstract fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult>
 
     protected fun requireLockfile(workingDir: File, condition: () -> Boolean) {
         require(analyzerConfig.allowDynamicVersions || condition()) {
@@ -287,7 +293,7 @@ abstract class PackageManager(
                 .takeUnless { it.isEmpty() } ?: "."
 
             "No lockfile found in '$relativePathString'. This potentially results in unstable versions of " +
-                    "dependencies. To allow this, enable support for dynamic versions."
+                    "dependencies. To support this, enable the 'allowDynamicVersions' option in '$ORT_CONFIG_FILENAME'."
         }
     }
 }
@@ -301,3 +307,15 @@ abstract class PackageManager(
  */
 fun parseAuthorString(author: String?, vararg delimiters: Char = charArrayOf('<')): String? =
     author?.split(*delimiters, limit = 2)?.firstOrNull()?.trim()?.ifEmpty { null }
+
+private fun PackageManagerResult.addDependencyGraphIfMissing(): PackageManagerResult {
+    // If the condition is true, then [CompatibilityDependencyNavigator] constructs a [DependencyGraphNavigator].
+    // That construction throws an exception if there is no dependency graph available.
+    val isGraphRequired = projectResults.values.flatten().any { it.project.scopeNames != null }
+
+    return if (isGraphRequired && dependencyGraph == null) {
+        copy(dependencyGraph = DependencyGraph())
+    } else {
+        this
+    }
+}
