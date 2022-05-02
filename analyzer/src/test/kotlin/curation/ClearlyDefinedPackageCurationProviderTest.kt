@@ -20,8 +20,8 @@
 package org.ossreviewtoolkit.analyzer.curation
 
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.matchers.collections.beEmpty
-import io.kotest.matchers.collections.haveSize
+import io.kotest.matchers.maps.beEmpty
+import io.kotest.matchers.maps.haveSize
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
@@ -31,43 +31,48 @@ import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 class ClearlyDefinedPackageCurationProviderTest : WordSpec({
     "The production server" should {
-        "return an existing curation for the javax.servlet-api Maven package" {
-            val provider = ClearlyDefinedPackageCurationProvider()
+        val provider = ClearlyDefinedPackageCurationProvider()
 
+        "return an existing curation for the javax.servlet-api Maven package" {
             val identifier = Identifier("Maven:javax.servlet:javax.servlet-api:3.1.0")
-            val curations = provider.getCurationsFor(identifier)
+            val curations = provider.getCurationsFor(listOf(identifier))
 
             curations should haveSize(1)
-            curations.first().data.concludedLicense shouldBe
+            curations.values.flatten().first().data.concludedLicense shouldBe
                     "CDDL-1.0 OR GPL-2.0-only WITH Classpath-exception-2.0".toSpdx()
         }
 
-        "return no curation for a non-existing dummy NPM package" {
-            val provider = ClearlyDefinedPackageCurationProvider()
+        "return an existing curation for the slf4j-log4j12 Maven package" {
+            val identifier = Identifier("Maven:org.slf4j:slf4j-log4j12:1.7.30")
+            val curations = provider.getCurationsFor(listOf(identifier))
 
+            curations should haveSize(1)
+            curations.values.flatten().first().data.vcs?.revision shouldBe "0b97c416e42a184ff9728877b461c616187c58f7"
+        }
+
+        "return no curation for a non-existing dummy NPM package" {
             val identifier = Identifier("NPM:@scope:name:1.2.3")
-            val curations = provider.getCurationsFor(identifier)
+            val curations = provider.getCurationsFor(listOf(identifier))
 
             curations should beEmpty()
         }
     }
 
     "The development server" should {
-        "return an existing curation for the platform-express NPM package" {
-            val provider = ClearlyDefinedPackageCurationProvider(Server.DEVELOPMENT)
+        val provider = ClearlyDefinedPackageCurationProvider(Server.DEVELOPMENT)
 
+        "return an existing curation for the platform-express NPM package" {
             val identifier = Identifier("NPM:@nestjs:platform-express:6.2.3")
-            val curations = provider.getCurationsFor(identifier)
+            val curations = provider.getCurationsFor(listOf(identifier))
 
             curations should haveSize(1)
-            curations.first().data.concludedLicense shouldBe "Apache-1.0".toSpdx()
+
+            curations.values.flatten().first().data.concludedLicense shouldBe "Apache-1.0".toSpdx()
         }
 
         "return no curation for a non-existing dummy Maven package" {
-            val provider = ClearlyDefinedPackageCurationProvider()
-
             val identifier = Identifier("Maven:group:name:1.2.3")
-            val curations = provider.getCurationsFor(identifier)
+            val curations = provider.getCurationsFor(listOf(identifier))
 
             curations should beEmpty()
         }

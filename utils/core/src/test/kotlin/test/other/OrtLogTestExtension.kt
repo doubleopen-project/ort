@@ -17,6 +17,7 @@
  * License-Filename: LICENSE
  */
 
+// Note that this deliberately is not an ORT package name.
 package test.other
 
 import java.io.File
@@ -28,6 +29,7 @@ import org.ossreviewtoolkit.utils.core.log
  * A test class simulating an external base class for ORT extensions. This is used to check whether extensions are
  * correctly detected over more complex hierarchies.
  */
+@Suppress("UnnecessaryAbstractClass")
 abstract class OrtLogTestBaseExtension : CommandLineTool
 
 /**

@@ -36,7 +36,6 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.spyk
 
-import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -51,12 +50,14 @@ import org.ossreviewtoolkit.clients.fossid.MapResponseBody
 import org.ossreviewtoolkit.clients.fossid.PolymorphicList
 import org.ossreviewtoolkit.clients.fossid.PolymorphicResponseBody
 import org.ossreviewtoolkit.clients.fossid.checkDownloadStatus
+import org.ossreviewtoolkit.clients.fossid.createIgnoreRule
 import org.ossreviewtoolkit.clients.fossid.createProject
 import org.ossreviewtoolkit.clients.fossid.createScan
 import org.ossreviewtoolkit.clients.fossid.deleteScan
 import org.ossreviewtoolkit.clients.fossid.downloadFromGit
 import org.ossreviewtoolkit.clients.fossid.getProject
 import org.ossreviewtoolkit.clients.fossid.listIdentifiedFiles
+import org.ossreviewtoolkit.clients.fossid.listIgnoreRules
 import org.ossreviewtoolkit.clients.fossid.listIgnoredFiles
 import org.ossreviewtoolkit.clients.fossid.listMarkedAsIdentifiedFiles
 import org.ossreviewtoolkit.clients.fossid.listPendingFiles
@@ -68,6 +69,9 @@ import org.ossreviewtoolkit.clients.fossid.model.identification.ignored.IgnoredF
 import org.ossreviewtoolkit.clients.fossid.model.identification.markedAsIdentified.License
 import org.ossreviewtoolkit.clients.fossid.model.identification.markedAsIdentified.LicenseFile
 import org.ossreviewtoolkit.clients.fossid.model.identification.markedAsIdentified.MarkedAsIdentifiedFile
+import org.ossreviewtoolkit.clients.fossid.model.rules.IgnoreRule
+import org.ossreviewtoolkit.clients.fossid.model.rules.RuleScope
+import org.ossreviewtoolkit.clients.fossid.model.rules.RuleType
 import org.ossreviewtoolkit.clients.fossid.model.status.DownloadStatus
 import org.ossreviewtoolkit.clients.fossid.model.status.ScanStatus
 import org.ossreviewtoolkit.clients.fossid.model.status.UnversionedScanDescription
@@ -165,6 +169,38 @@ class FossIdTest : WordSpec({
 
             coVerify(exactly = 0) {
                 service.createProject(any())
+            }
+        }
+
+        "throw an exception if the scan download failed" {
+            val projectCode = projectCode(PROJECT)
+            val scanCode = scanCode(PROJECT, null)
+            val config = createConfig(deltaScans = false)
+            val vcsInfo = createVcsInfo()
+            val scan = createScan(vcsInfo.url, "${vcsInfo.revision}_other", scanCode)
+
+            val service = config.createService()
+                .expectProjectRequest(projectCode)
+                .expectListScans(projectCode, listOf(scan))
+                .expectCheckScanStatus(scanCode, ScanStatus.FINISHED)
+                .expectCreateScan(projectCode, scanCode, vcsInfo)
+                .expectDeleteScan(scanCode)
+
+            coEvery { service.downloadFromGit(USER, API_KEY, scanCode) } returns
+                    EntityResponseBody(status = 1)
+            coEvery { service.checkDownloadStatus(USER, API_KEY, scanCode) } returns
+                    EntityResponseBody(status = 1, data = DownloadStatus.FAILED)
+
+            val fossId = createFossId(config)
+            fossId.scan(listOf(createPackage(createIdentifier(index = 1), vcsInfo)))
+
+            coVerify {
+                service.createScan(USER, API_KEY, projectCode, scanCode, vcsInfo.url, vcsInfo.revision)
+                service.downloadFromGit(USER, API_KEY, scanCode)
+                service.checkDownloadStatus(USER, API_KEY, scanCode)
+                service.downloadFromGit(USER, API_KEY, scanCode)
+                // The fact that deleteScan has been called is a proof that an exception has been thrown.
+                service.deleteScan(USER, API_KEY, scanCode)
             }
         }
 
@@ -389,7 +425,7 @@ class FossIdTest : WordSpec({
             shouldThrow<TimeoutCancellationException> {
                 withTimeout(1000) {
                     fossId.scanPackages(
-                        setOf(createPackage(createIdentifier(index = 1), vcsInfo)), File("output"), emptyMap()
+                        setOf(createPackage(createIdentifier(index = 1), vcsInfo)), emptyMap()
                     )
                 }
             }
@@ -461,6 +497,7 @@ class FossIdTest : WordSpec({
                 .expectCheckScanStatus(scanCode, ScanStatus.NOT_STARTED, ScanStatus.FINISHED)
                 .expectCreateScan(projectCode, scanCode, vcsInfo)
                 .expectDownload(scanCode)
+                .expectListIgnoreRules(originCode, emptyList())
                 .mockFiles(scanCode)
             coEvery { service.runScan(any()) } returns EntityResponseBody(status = 1)
 
@@ -473,6 +510,47 @@ class FossIdTest : WordSpec({
                 service.downloadFromGit(USER, API_KEY, scanCode)
                 service.checkDownloadStatus(USER, API_KEY, scanCode)
                 service.runScan(USER, API_KEY, scanCode, *FossId.deltaScanRunParameters(originCode))
+            }
+        }
+
+        "carry exclusion rules to a delta scan from an existing scan" {
+            val projectCode = projectCode(PROJECT)
+            val originCode = "originalScanCode"
+            val scanCode = scanCode(PROJECT, FossId.DeltaTag.DELTA)
+            val config = createConfig()
+            val vcsInfo = createVcsInfo()
+            val scan = createScan(vcsInfo.url, vcsInfo.revision, originCode)
+
+            val service = config.createService()
+                .expectProjectRequest(projectCode)
+                .expectListScans(projectCode, listOf(scan))
+                .expectCheckScanStatus(originCode, ScanStatus.FINISHED)
+                .expectCheckScanStatus(scanCode, ScanStatus.NOT_STARTED, ScanStatus.FINISHED)
+                .expectCreateScan(projectCode, scanCode, vcsInfo)
+                .expectDownload(scanCode)
+                .expectListIgnoreRules(originCode, listOf(IGNORE_RULE))
+                .expectCreateIgnoreRule(scanCode, IGNORE_RULE.type, IGNORE_RULE.value, DEFAULT_IGNORE_RULE_SCOPE)
+                .mockFiles(scanCode)
+            coEvery { service.runScan(any()) } returns EntityResponseBody(status = 1)
+
+            val fossId = createFossId(config)
+
+            fossId.scan(listOf(createPackage(createIdentifier(index = 1), vcsInfo)))
+
+            coVerify {
+                service.createScan(USER, API_KEY, projectCode, scanCode, vcsInfo.url, vcsInfo.revision)
+                service.downloadFromGit(USER, API_KEY, scanCode)
+                service.checkDownloadStatus(USER, API_KEY, scanCode)
+                service.runScan(USER, API_KEY, scanCode, *FossId.deltaScanRunParameters(originCode))
+                service.listIgnoreRules(USER, API_KEY, originCode)
+                service.createIgnoreRule(
+                    USER,
+                    API_KEY,
+                    scanCode,
+                    IGNORE_RULE.type,
+                    IGNORE_RULE.value,
+                    DEFAULT_IGNORE_RULE_SCOPE
+                )
             }
         }
 
@@ -556,15 +634,20 @@ class FossIdTest : WordSpec({
             val scanCode = scanCode(PROJECT, FossId.DeltaTag.DELTA)
             val config = createConfig(deltaScanLimit = deltaScanLimit)
             val vcsInfo = createVcsInfo()
-            val originScan = createScan(vcsInfo.url, vcsInfo.revision, originCode, scanId = "${SCAN_ID}0")
-            val otherScan1 = createScan(vcsInfo.url, "${vcsInfo.revision}_other", "anotherCode")
-            val otherScan2 = createScan("someURL", "someRevision", "someCode", scanId = "zzz")
+            val originScan = createScan(vcsInfo.url, vcsInfo.revision, originCode, scanId = SCAN_ID)
+            val otherScan1 = createScan(
+                vcsInfo.url,
+                "${vcsInfo.revision}_other",
+                "anotherCode",
+                scanId = 0
+            )
+            val otherScan2 = createScan("someURL", "someRevision", "someCode", scanId = 999)
             val deltaScans = (1..numberOfDeltaScans).map {
                 createScan(
                     vcsInfo.url,
                     vcsInfo.revision,
                     scanCode = scanCode(PROJECT, FossId.DeltaTag.DELTA, it),
-                    "$SCAN_ID$it"
+                    SCAN_ID + it
                 )
             }
 
@@ -578,6 +661,7 @@ class FossIdTest : WordSpec({
                 .expectCheckScanStatus(scanCode, ScanStatus.NOT_STARTED, ScanStatus.FINISHED)
                 .expectCreateScan(projectCode, scanCode, vcsInfo)
                 .expectDownload(scanCode)
+                .expectListIgnoreRules(recentScan.code!!, emptyList())
                 .mockFiles(scanCode)
             coEvery { service.runScan(any()) } returns EntityResponseBody(status = 1)
             coEvery { service.deleteScan(any()) } returns EntityResponseBody(status = 1)
@@ -621,7 +705,13 @@ private const val REVISION = "test-revision"
 private const val FOSSID_VERSION = "2021.2.2"
 
 /** A test scan ID that is returned by default when mocking the creation of a scan. */
-private const val SCAN_ID = "testScanId"
+private const val SCAN_ID = 1
+
+/** An [IgnoreRule], returned by default wrapped in a list when mocking the listing of exclusion rules. */
+private val IGNORE_RULE = IgnoreRule(1, RuleType.EXTENSION, ".docx", SCAN_ID, "2021-06-09 14:45:25")
+
+/** The default scope used when creating ignore rule. */
+private val DEFAULT_IGNORE_RULE_SCOPE = RuleScope.SCAN
 
 /**
  * Create a new [FossId] instance with the specified [config].
@@ -642,7 +732,7 @@ private fun createConfig(
     val config = FossIdConfig(
         "https://www.example.org/fossid",
         API_KEY, USER, waitForResult, packageNamespaceFilter, packageAuthorsFilter, addAuthenticationToUrl = false,
-        deltaScans, deltaScanLimit, emptyMap()
+        deltaScans, deltaScanLimit, 60, emptyMap()
     )
 
     val service = createServiceMock()
@@ -709,12 +799,13 @@ private fun createScanDescription(state: ScanStatus): UnversionedScanDescription
 /**
  * Create a mock [Scan] with the given properties.
  */
-private fun createScan(url: String, revision: String, scanCode: String, scanId: String = SCAN_ID): Scan {
+private fun createScan(url: String, revision: String, scanCode: String, scanId: Int = SCAN_ID): Scan {
     val scan = mockk<Scan>()
     every { scan.gitRepoUrl } returns url
     every { scan.gitBranch } returns revision
     every { scan.code } returns scanCode
     every { scan.id } returns scanId
+    every { scan.isArchived } returns null
     return scan
 }
 
@@ -750,7 +841,8 @@ private fun filePath(index: Int): String = "/path/to/file$index.kt"
 /**
  * Create a [TextLocation] that references a test file without any line information.
  */
-private fun textLocation(fileIndex: Int): TextLocation = TextLocation(filePath(fileIndex), -1, -1)
+private fun textLocation(fileIndex: Int): TextLocation =
+    TextLocation(filePath(fileIndex), TextLocation.UNKNOWN_LINE, TextLocation.UNKNOWN_LINE)
 
 /**
  * Create an [IdentifiedFile] based on the given [index].
@@ -864,6 +956,33 @@ private fun FossIdServiceWithVersion.expectListScans(projectCode: String, scans:
 }
 
 /**
+ * Prepare this service mock to return the list of [rules] for the given [scanCode].
+ */
+private fun FossIdServiceWithVersion.expectListIgnoreRules(
+    scanCode: String, rules: List<IgnoreRule>
+): FossIdServiceWithVersion {
+    coEvery { listIgnoreRules(USER, API_KEY, scanCode) } returns
+            PolymorphicResponseBody(status = 1, data = PolymorphicList(rules))
+    return this
+}
+
+/**
+ * Prepare this service mock to expect a request to create an 'ignore rule' for the given [scanCode], [ruleType],
+ * [value] and [scope].
+ */
+private fun FossIdServiceWithVersion.expectCreateIgnoreRule(
+    scanCode: String,
+    ruleType: RuleType,
+    value: String,
+    scope: RuleScope
+): FossIdServiceWithVersion {
+    coEvery {
+        createIgnoreRule(USER, API_KEY, scanCode, ruleType, value, scope)
+    } returns EntityResponseBody(status = 1)
+    return this
+}
+
+/**
  * Prepare this service mock to expect a download trigger for the given [scanCode] and later on to report that the
  * download has finished.
  */
@@ -886,7 +1005,7 @@ private fun FossIdServiceWithVersion.expectCreateScan(
 ): FossIdServiceWithVersion {
     coEvery {
         createScan(USER, API_KEY, projectCode, scanCode, vcsInfo.url, vcsInfo.revision)
-    } returns MapResponseBody(status = 1, data = mapOf("scan_id" to SCAN_ID))
+    } returns MapResponseBody(status = 1, data = mapOf("scan_id" to SCAN_ID.toString()))
     return this
 }
 
@@ -950,7 +1069,7 @@ private fun FossId.scan(packages: List<Package>): ScannerRun {
     every { mockResult.getPackages(any()) } returns curatedPackages
     every { mockResult.getProjects(any()) } returns emptySet()
 
-    val newResult = runBlocking { scanOrtResult(this@scan, mockResult, File("irrelevant")) }
+    val newResult = runBlocking { scanOrtResult(this@scan, mockResult) }
 
     return newResult.scanner!!
 }

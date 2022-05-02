@@ -19,6 +19,8 @@
 
 package org.ossreviewtoolkit.analyzer.managers
 
+import com.fasterxml.jackson.databind.JsonNode
+
 import com.vdurmont.semver4j.Requirement
 
 import java.io.File
@@ -28,10 +30,11 @@ import org.ossreviewtoolkit.analyzer.managers.utils.hasYarnLockFile
 import org.ossreviewtoolkit.analyzer.managers.utils.mapDefinitionFilesForYarn
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
+import org.ossreviewtoolkit.model.jsonMapper
 import org.ossreviewtoolkit.utils.common.Os
 
 /**
- * The [Yarn](https://www.yarnpkg.com/) package manager for JavaScript.
+ * The [Yarn](https://classic.yarnpkg.com/) package manager for JavaScript.
  */
 class Yarn(
     name: String,
@@ -49,8 +52,6 @@ class Yarn(
         ) = Yarn(managerName, analysisRoot, analyzerConfig, repoConfig)
     }
 
-    override val installParameters = arrayOf("--ignore-scripts", "--ignore-engines")
-
     override fun hasLockFile(projectDir: File) = hasYarnLockFile(projectDir)
 
     override fun command(workingDir: File?) = if (Os.isWindows) "yarn.cmd" else "yarn"
@@ -62,5 +63,12 @@ class Yarn(
     override fun beforeResolution(definitionFiles: List<File>) =
         // We do not actually depend on any features specific to a Yarn version, but we still want to stick to a
         // fixed minor version to be sure to get consistent results.
-        checkVersion(analyzerConfig.ignoreToolVersions)
+        checkVersion()
+
+    override fun runInstall(workingDir: File) = run(workingDir, "install", "--ignore-scripts", "--ignore-engines")
+
+    override fun getRemotePackageDetails(workingDir: File, packageName: String): JsonNode {
+        val process = run(workingDir, "info", "--json", packageName)
+        return jsonMapper.readTree(process.stdoutFile)["data"]
+    }
 }

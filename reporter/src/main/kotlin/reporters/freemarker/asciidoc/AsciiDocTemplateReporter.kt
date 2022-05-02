@@ -22,8 +22,6 @@ package org.ossreviewtoolkit.reporter.reporters.freemarker.asciidoc
 
 import java.io.File
 
-import kotlin.io.path.createTempDirectory
-
 import org.asciidoctor.Asciidoctor
 import org.asciidoctor.Attributes
 import org.asciidoctor.Options
@@ -33,7 +31,7 @@ import org.ossreviewtoolkit.reporter.Reporter
 import org.ossreviewtoolkit.reporter.ReporterInput
 import org.ossreviewtoolkit.reporter.reporters.freemarker.FreemarkerTemplateProcessor
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
 
 /**
  * An abstract [Reporter] that uses [Apache Freemarker][1] templates and [AsciiDoc][2] with [AsciidoctorJ][3] to create
@@ -52,6 +50,7 @@ abstract class AsciiDocTemplateReporter(private val backend: String, override va
 
         private const val DISCLOSURE_TEMPLATE_ID = "disclosure_document"
         private const val VULNERABILITY_TEMPLATE_ID = "vulnerability_report"
+        private const val DEFECT_TEMPLATE_ID = "defect_report"
     }
 
     private val templateProcessor = FreemarkerTemplateProcessor(
@@ -59,13 +58,13 @@ abstract class AsciiDocTemplateReporter(private val backend: String, override va
         ASCII_DOC_FILE_EXTENSION,
         ASCII_DOC_TEMPLATE_DIRECTORY
     )
-    private val asciidoctor = Asciidoctor.Factory.create()
+    private val asciidoctor by lazy { Asciidoctor.Factory.create() }
 
     protected open fun processTemplateOptions(options: MutableMap<String, String>): Attributes =
         Attributes.builder().build()
 
     final override fun generateReport(input: ReporterInput, outputDir: File, options: Map<String, String>): List<File> {
-        val asciiDocOutputDir = createTempDirectory("$ORT_NAME-asciidoc").toFile()
+        val asciiDocOutputDir = createOrtTempDir("asciidoc")
 
         val templateOptions = options.toMutableMap()
         val asciidoctorAttributes = processTemplateOptions(templateOptions)
@@ -87,14 +86,17 @@ abstract class AsciiDocTemplateReporter(private val backend: String, override va
     ): List<File> {
         val templateOptions = options.toMutableMap()
 
-        if (!templateOptions.contains(FreemarkerTemplateProcessor.OPTION_TEMPLATE_PATH)) {
-            templateOptions.putIfAbsent(FreemarkerTemplateProcessor.OPTION_TEMPLATE_ID, buildString {
-                append(DISCLOSURE_TEMPLATE_ID)
+        if (FreemarkerTemplateProcessor.OPTION_TEMPLATE_PATH !in templateOptions) {
+            templateOptions.putIfAbsent(
+                FreemarkerTemplateProcessor.OPTION_TEMPLATE_ID,
+                buildString {
+                    append(DISCLOSURE_TEMPLATE_ID)
 
-                if (input.ortResult.getAdvisorResults().isNotEmpty()) {
-                    append(",$VULNERABILITY_TEMPLATE_ID")
+                    if (input.ortResult.getAdvisorResults().isNotEmpty()) {
+                        append(",$VULNERABILITY_TEMPLATE_ID,$DEFECT_TEMPLATE_ID")
+                    }
                 }
-            })
+            )
         }
 
         return templateProcessor.processTemplates(input, outputDir, templateOptions)

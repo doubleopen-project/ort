@@ -26,6 +26,7 @@ import java.time.Instant
 import org.ossreviewtoolkit.advisor.AbstractAdviceProviderFactory
 import org.ossreviewtoolkit.advisor.AdviceProvider
 import org.ossreviewtoolkit.clients.ossindex.OssIndexService
+import org.ossreviewtoolkit.model.AdvisorCapability
 import org.ossreviewtoolkit.model.AdvisorDetails
 import org.ossreviewtoolkit.model.AdvisorResult
 import org.ossreviewtoolkit.model.AdvisorSummary
@@ -34,6 +35,7 @@ import org.ossreviewtoolkit.model.Vulnerability
 import org.ossreviewtoolkit.model.VulnerabilityReference
 import org.ossreviewtoolkit.model.config.AdvisorConfiguration
 import org.ossreviewtoolkit.model.utils.toPurl
+import org.ossreviewtoolkit.utils.common.enumSetOf
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.core.log
 
@@ -42,7 +44,7 @@ import retrofit2.HttpException
 /**
  * The number of packages to request from Sonatype OSS Index in one request.
  */
-private const val REQUEST_CHUNK_SIZE = 128
+private const val BULK_REQUEST_SIZE = 128
 
 /**
  * A wrapper for [Sonatype OSS Index](https://ossindex.sonatype.org/) security vulnerability data.
@@ -51,6 +53,8 @@ class OssIndex(name: String, serverUrl: String = OssIndexService.DEFAULT_BASE_UR
     class Factory : AbstractAdviceProviderFactory<OssIndex>("OssIndex") {
         override fun create(config: AdvisorConfiguration) = OssIndex(providerName)
     }
+
+    override val details = AdvisorDetails(providerName, enumSetOf(AdvisorCapability.VULNERABILITIES))
 
     private val service by lazy {
         OssIndexService.create(
@@ -67,7 +71,7 @@ class OssIndex(name: String, serverUrl: String = OssIndexService.DEFAULT_BASE_UR
         return try {
             val componentReports = mutableMapOf<String, OssIndexService.ComponentReport>()
 
-            components.chunked(REQUEST_CHUNK_SIZE).forEach { chunk ->
+            components.chunked(BULK_REQUEST_SIZE).forEach { chunk ->
                 val requestResults = getComponentReport(service, chunk).associateBy {
                     it.coordinates
                 }
@@ -81,7 +85,7 @@ class OssIndex(name: String, serverUrl: String = OssIndexService.DEFAULT_BASE_UR
                 componentReports[pkg.id.toPurl()]?.let { report ->
                     pkg to listOf(
                         AdvisorResult(
-                            AdvisorDetails(providerName),
+                            details,
                             AdvisorSummary(startTime, endTime),
                             vulnerabilities = report.vulnerabilities.map { it.toVulnerability() }
                         )

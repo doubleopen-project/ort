@@ -18,17 +18,25 @@
  * License-Filename: LICENSE
  */
 
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 val exposedVersion: String by project
 val hikariVersion: String by project
 val jacksonVersion: String by project
 val kotlinxCoroutinesVersion: String by project
+val kotlinxSerializationVersion: String by project
 val mockkVersion: String by project
 val postgresVersion: String by project
-val postgresEmbeddedVersion: String by project
+val retrofitKotlinxSerializationConverterVersion: String by project
 val retrofitVersion: String by project
-val scancodeVersion: String by project
+val scanossVersion: String by project
 val sw360ClientVersion: String by project
 val wiremockVersion: String by project
+
+val askalonoVersion: String by project
+val boyterLcVersion: String by project
+val licenseeVersion: String by project
+val scancodeVersion: String by project
 
 plugins {
     // Apply core plugins.
@@ -52,10 +60,12 @@ dependencies {
 
     implementation(project(":clients:clearly-defined"))
     implementation(project(":clients:fossid-webapp"))
+    implementation(project(":clients:scanoss"))
     implementation(project(":downloader"))
     implementation(project(":utils:core-utils"))
 
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:$jacksonVersion")
+    implementation("com.scanoss:scanner:$scanossVersion")
     implementation("com.squareup.retrofit2:converter-jackson:$retrofitVersion")
     implementation("com.zaxxer:HikariCP:$hikariVersion")
     implementation("org.eclipse.sw360:client:$sw360ClientVersion")
@@ -66,14 +76,33 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutinesVersion")
     implementation("org.postgresql:postgresql:$postgresVersion")
 
-    testImplementation("com.github.tomakehurst:wiremock:$wiremockVersion")
+    testImplementation("com.github.tomakehurst:wiremock-jre8:$wiremockVersion")
     testImplementation("io.mockk:mockk:$mockkVersion")
-
-    funTestImplementation("com.opentable.components:otj-pg-embedded:$postgresEmbeddedVersion")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion")
+    testImplementation(
+        "com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:" +
+                retrofitKotlinxSerializationConverterVersion
+    )
 }
 
 buildConfig {
     packageName("org.ossreviewtoolkit.scanner")
 
+    buildConfigField("String", "ASKALONO_VERSION", "\"$askalonoVersion\"")
+    buildConfigField("String", "BOYTER_LC_VERSION", "\"$boyterLcVersion\"")
+    buildConfigField("String", "LICENSEE_VERSION", "\"$licenseeVersion\"")
     buildConfigField("String", "SCANCODE_VERSION", "\"$scancodeVersion\"")
+    buildConfigField("String", "SCANOSS_VERSION", "\"$scanossVersion\"")
+}
+
+tasks.withType<KotlinCompile> {
+    val customCompilerArgs = listOf(
+        "-opt-in=kotlinx.serialization.ExperimentalSerializationApi"
+    )
+
+    if ("test" in name.toLowerCase()) {
+        kotlinOptions {
+            freeCompilerArgs = freeCompilerArgs + customCompilerArgs
+        }
+    }
 }

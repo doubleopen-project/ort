@@ -19,9 +19,8 @@
 
 package org.ossreviewtoolkit.model.licenses
 
-import io.kotest.assertions.show.show
 import io.kotest.matchers.Matcher
-import io.kotest.matchers.MatcherResult
+import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.neverNullMatcher
 
 import org.ossreviewtoolkit.utils.spdx.SpdxExpression
@@ -33,11 +32,6 @@ object TestUtils {
             val expected = licenses.map { SpdxExpression.parse(it) as SpdxSingleLicenseExpression }.toSet()
             val actual = value.map { it.license }.toSet()
 
-            MatcherResult(
-                expected == actual,
-                "ResolvedLicenseInfo should contain exactly licenses ${expected.show().value}, but has " +
-                        actual.show().value,
-                "ResolvedLicenseInfo should not contain exactly ${expected.show().value}"
-            )
+            containExactly(expected).test(actual)
         }
 }

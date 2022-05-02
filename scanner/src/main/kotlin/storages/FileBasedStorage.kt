@@ -26,14 +26,12 @@ import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 
-import org.ossreviewtoolkit.model.Failure
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.Result
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanResultContainer
-import org.ossreviewtoolkit.model.Success
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.scanner.ScanResultsStorage
+import org.ossreviewtoolkit.scanner.experimental.ScanStorageException
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
 import org.ossreviewtoolkit.utils.core.log
 import org.ossreviewtoolkit.utils.core.showStackTrace
@@ -55,33 +53,25 @@ class FileBasedStorage(
     override fun readInternal(id: Identifier): Result<List<ScanResult>> {
         val path = storagePath(id)
 
-        @Suppress("TooGenericExceptionCaught")
-        return try {
+        return runCatching {
             backend.read(path).use { input ->
-                Success(yamlMapper.readValue<ScanResultContainer>(input).results)
+                yamlMapper.readValue<ScanResultContainer>(input).results
             }
-        } catch (e: Exception) {
-            when (e) {
-                is FileNotFoundException -> {
-                    // If the file cannot be found it means no scan results have been stored, yet.
-                    Success(emptyList())
-                }
-                else -> {
-                    val message = "Could not read scan results for '${id.toCoordinates()}' from path '$path': " +
-                            e.collectMessagesAsString()
+        }.recoverCatching {
+            // If the file cannot be found it means no scan results have been stored, yet.
+            if (it is FileNotFoundException) return EMPTY_RESULT
 
-                    log.info { message }
-                    Failure(message)
-                }
-            }
+            val message = "Could not read scan results for '${id.toCoordinates()}' from path '$path': " +
+                    it.collectMessagesAsString()
+
+            log.info { message }
+
+            throw ScanStorageException(message)
         }
     }
 
     override fun addInternal(id: Identifier, scanResult: ScanResult): Result<Unit> {
-        val existingScanResults = when (val readResult = read(id)) {
-            is Success -> readResult.result
-            is Failure -> emptyList()
-        }
+        val existingScanResults = read(id).getOrDefault(emptyList())
 
         if (existingScanResults.any { it.scanner == scanResult.scanner && it.provenance == scanResult.provenance }) {
             val message = "Did not store scan result for '${id.toCoordinates()}' because a scan result for the same " +
@@ -89,7 +79,7 @@ class FileBasedStorage(
 
             log.warn { message }
 
-            return Failure(message)
+            return Result.failure(ScanStorageException(message))
         }
 
         val scanResults = existingScanResults + scanResult
@@ -98,23 +88,19 @@ class FileBasedStorage(
         val yamlBytes = yamlMapper.writeValueAsBytes(ScanResultContainer(id, scanResults))
         val input = ByteArrayInputStream(yamlBytes)
 
-        @Suppress("TooGenericExceptionCaught")
-        return try {
+        return runCatching {
             backend.write(path, input)
             log.debug { "Stored scan result for '${id.toCoordinates()}' at path '$path'." }
-            Success(Unit)
-        } catch (e: Exception) {
-            when (e) {
-                is IllegalArgumentException, is IOException -> {
-                    e.showStackTrace()
+        }.onFailure {
+            if (it is IllegalArgumentException || it is IOException) {
+                it.showStackTrace()
 
-                    val message = "Could not store scan result for '${id.toCoordinates()}' at path '$path': " +
-                            e.collectMessagesAsString()
-                    log.warn { message }
+                val message = "Could not store scan result for '${id.toCoordinates()}' at path '$path': " +
+                        it.collectMessagesAsString()
 
-                    Failure(message)
-                }
-                else -> throw e
+                log.warn { message }
+
+                return Result.failure(ScanStorageException(message))
             }
         }
     }

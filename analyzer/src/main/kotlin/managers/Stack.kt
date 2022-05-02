@@ -46,6 +46,7 @@ import org.ossreviewtoolkit.model.utils.toPurl
 import org.ossreviewtoolkit.utils.common.CommandLineTool
 import org.ossreviewtoolkit.utils.common.ProcessCapture
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.unquote
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.core.log
 
@@ -71,14 +72,14 @@ class Stack(
     override fun command(workingDir: File?) = "stack"
 
     override fun transformVersion(output: String) =
-        // Stack could report version strings like:
+        // The version string can be something like:
         // Version 1.7.1 x86_64
         // Version 2.1.1, Git revision f612ea85316bbc327a64e4ad8d9f0b150dc12d4b (7648 commits) x86_64 hpack-0.31.2
         output.removePrefix("Version ").substringBefore(',').substringBefore(' ')
 
     override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[2.1.1,)")
 
-    override fun beforeResolution(definitionFiles: List<File>) = checkVersion(analyzerConfig.ignoreToolVersions)
+    override fun beforeResolution(definitionFiles: List<File>) = checkVersion()
 
     override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val workingDir = definitionFile.parentFile
@@ -115,8 +116,8 @@ class Stack(
             val dependencies = mutableMapOf<String, MutableList<String>>()
 
             dotParser.edges.values.forEach { edge ->
-                val parent = edge.node1.id.removeSurrounding("\"")
-                val child = edge.node2.id.removeSurrounding("\"")
+                val parent = edge.node1.id.unquote()
+                val child = edge.node2.id.unquote()
                 dependencies.getOrPut(parent) { mutableListOf() } += child
             }
 

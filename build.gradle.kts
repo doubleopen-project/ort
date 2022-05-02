@@ -21,15 +21,18 @@
 import com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask
 
 import io.gitlab.arturbosch.detekt.Detekt
-import io.gitlab.arturbosch.detekt.report.ReportMergeTask
 
 import java.net.URL
+
+import org.eclipse.jgit.api.Git
 
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
+import org.jetbrains.gradle.ext.Gradle
+import org.jetbrains.gradle.ext.runConfigurations
+import org.jetbrains.gradle.ext.settings
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
-import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 val detektPluginVersion: String by project
@@ -48,6 +51,7 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
     id("org.barfuin.gradle.taskinfo")
     id("org.jetbrains.dokka")
+    id("org.jetbrains.gradle.plugin.idea-ext")
 }
 
 buildscript {
@@ -58,11 +62,12 @@ buildscript {
     }
 }
 
+// Only override a default version (which usually is "unspecified"), but not a custom version.
 if (version == Project.DEFAULT_VERSION) {
-    version = org.eclipse.jgit.api.Git.open(rootDir).use { git ->
-        // Make the output exactly match "git describe --abbrev=7 --always --tags --dirty", which is what is used in
-        // "scripts/docker_build.sh".
-        val description = git.describe().setAlways(true).setTags(true).call()
+    version = Git.open(rootDir).use { git ->
+        // Make the output exactly match "git describe --abbrev=10 --always --tags --dirty", which is what is used in
+        // "scripts/docker_build.sh", to make the hash match what JitPack uses.
+        val description = git.describe().setAbbrev(10).setAlways(true).setTags(true).call()
         val isDirty = git.status().call().hasUncommittedChanges()
 
         if (isDirty) "$description-dirty" else description
@@ -79,6 +84,20 @@ if (!javaVersion.isCompatibleWith(JavaVersion.VERSION_11)) {
     throw GradleException("At least Java 11 is required, but Java $javaVersion is being used.")
 }
 
+idea {
+    project {
+        settings {
+            runConfigurations {
+                // Disable "condensed" multi-line diffs when running tests from the IDE via Gradle run configurations to
+                // more easily accept actual results as expected results.
+                defaults(Gradle::class.java) {
+                    jvmArgs = "-Dkotest.assertions.multi-line-diff=simple"
+                }
+            }
+        }
+    }
+}
+
 extensions.findByName("buildScan")?.withGroovyBuilder {
     setProperty("termsOfServiceUrl", "https://gradle.com/terms-of-service")
     setProperty("termsOfServiceAgree", "yes")
@@ -86,7 +105,7 @@ extensions.findByName("buildScan")?.withGroovyBuilder {
 
 tasks.named<DependencyUpdatesTask>("dependencyUpdates").configure {
     val nonFinalQualifiers = listOf(
-        "alpha", "b", "beta", "cr", "ea", "eap", "m", "milestone", "pr", "preview", "rc"
+        "alpha", "b", "beta", "cr", "dev", "ea", "eap", "m", "milestone", "pr", "preview", "rc", "\\d{14}"
     ).joinToString("|", "(", ")")
 
     val nonFinalQualifiersRegex = Regex(".*[.-]$nonFinalQualifiers[.\\d-+]*", RegexOption.IGNORE_CASE)
@@ -96,10 +115,6 @@ tasks.named<DependencyUpdatesTask>("dependencyUpdates").configure {
     rejectVersionIf {
         candidate.version.matches(nonFinalQualifiersRegex)
     }
-}
-
-val mergeDetektReports by tasks.registering(ReportMergeTask::class) {
-    output.set(rootProject.buildDir.resolve("reports/detekt/merged.sarif"))
 }
 
 allprojects {
@@ -132,31 +147,26 @@ allprojects {
         buildUponDefaultConfig = true
         config = files("$rootDir/.detekt.yml")
 
-        input = files("$rootDir/buildSrc", "build.gradle.kts", "src/main/kotlin", "src/test/kotlin",
-            "src/funTest/kotlin")
+        source.from(fileTree(".") { include("*.gradle.kts") }, "src/funTest/kotlin")
 
         basePath = rootProject.projectDir.path
-
-        reports {
-            html.enabled = false
-            sarif.enabled = true
-            txt.enabled = false
-            xml.enabled = false
-        }
     }
 
     tasks.withType<Detekt> detekt@{
         dependsOn(":detekt-rules:assemble")
 
-        finalizedBy(mergeDetektReports)
-
-        mergeDetektReports {
-            input.from(this@detekt.sarifReportFile)
+        reports {
+            html.required.set(false)
+            sarif.required.set(true)
+            txt.required.set(false)
+            xml.required.set(false)
         }
     }
 }
 
 subprojects {
+    version = rootProject.version
+
     if (name == "reporter-web-app") return@subprojects
 
     // Apply core plugins.
@@ -167,19 +177,21 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "org.jetbrains.dokka")
 
-    sourceSets.create("funTest") {
-        withConvention(KotlinSourceSet::class) {
-            kotlin.srcDirs("src/funTest/kotlin")
+    testing {
+        suites {
+            register("funTest", JvmTestSuite::class) {
+                sources {
+                    kotlin {
+                        testType.set(TestSuiteType.FUNCTIONAL_TEST)
+                    }
+                }
+            }
         }
     }
 
     // Associate the "funTest" compilation with the "main" compilation to be able to access "internal" objects from
     // functional tests.
-    // TODO: The feature to access "internal" objects from functional tests is not actually used yet because the IDE
-    //       would still highlight such access as an error. Still keep this code around until that bug in the IDE (see
-    //       https://youtrack.jetbrains.com/issue/KT-34102) is fixed as the correct syntax for this code was not easy to
-    //       determine.
-    kotlin.target.compilations.run {
+    kotlin.target.compilations.apply {
         getByName("funTest").associateWith(getByName(KotlinCompilation.MAIN_COMPILATION_NAME))
     }
 
@@ -189,11 +201,13 @@ subprojects {
 
             "testImplementation"("io.kotest:kotest-runner-junit5:$kotestVersion")
             "testImplementation"("io.kotest:kotest-assertions-core:$kotestVersion")
-
-            "funTestImplementation"(sourceSets["main"].output)
         }
 
         configurations["funTestImplementation"].extendsFrom(configurations["testImplementation"])
+    }
+
+    dependencies {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinPluginVersion")
     }
 
     configurations.all {
@@ -217,15 +231,15 @@ subprojects {
     tasks.withType<KotlinCompile>().configureEach {
         val customCompilerArgs = listOf(
             "-Xallow-result-return-type",
-            "-Xopt-in=kotlin.contracts.ExperimentalContracts",
-            "-Xopt-in=kotlin.io.path.ExperimentalPathApi",
-            "-Xopt-in=kotlin.time.ExperimentalTime"
+            "-opt-in=kotlin.contracts.ExperimentalContracts",
+            "-opt-in=kotlin.io.path.ExperimentalPathApi",
+            "-opt-in=kotlin.time.ExperimentalTime"
         )
 
         kotlinOptions {
             allWarningsAsErrors = true
-            jvmTarget = "11"
-            apiVersion = "1.5"
+            jvmTarget = javaVersion.majorVersion
+            apiVersion = "1.6"
             freeCompilerArgs = freeCompilerArgs + customCompilerArgs
         }
     }
@@ -264,49 +278,31 @@ subprojects {
         }
     }
 
-    val funTest by tasks.registering(Test::class) {
-        description = "Runs the functional tests."
-        group = "Verification"
+    tasks.withType<Test>().configureEach {
+        val testSystemProperties = mutableListOf("gradle.build.dir" to project.buildDir.path)
 
-        classpath = sourceSets["funTest"].runtimeClasspath
-        testClassesDirs = sourceSets["funTest"].output.classesDirs
-    }
-
-    // Enable JaCoCo only if a JacocoReport task is in the graph as JaCoCo
-    // is using "append = true" which disables Gradle's build cache.
-    gradle.taskGraph.whenReady {
-        val enabled = allTasks.any { it is JacocoReport }
-
-        tasks.withType<Test>().configureEach {
-            extensions.configure(JacocoTaskExtension::class) {
-                isEnabled = enabled
-            }
-
-            val testSystemProperties = mutableListOf("gradle.build.dir" to project.buildDir.path)
-
-            listOf(
-                "kotest.assertions.multi-line-diff",
-                "kotest.tags.include",
-                "kotest.tags.exclude"
-            ).mapNotNullTo(testSystemProperties) { key ->
-                System.getProperty(key)?.let { key to it }
-            }
-
-            systemProperties = testSystemProperties.toMap()
-
-            testLogging {
-                events = setOf(TestLogEvent.STARTED, TestLogEvent.PASSED, TestLogEvent.SKIPPED, TestLogEvent.FAILED)
-                exceptionFormat = TestExceptionFormat.FULL
-            }
-
-            useJUnitPlatform()
+        listOf(
+            "java.io.tmpdir",
+            "kotest.assertions.multi-line-diff",
+            "kotest.tags"
+        ).mapNotNullTo(testSystemProperties) { key ->
+            System.getProperty(key)?.let { key to it }
         }
+
+        systemProperties = testSystemProperties.toMap()
+
+        testLogging {
+            events = setOf(TestLogEvent.STARTED, TestLogEvent.PASSED, TestLogEvent.SKIPPED, TestLogEvent.FAILED)
+            exceptionFormat = TestExceptionFormat.FULL
+        }
+
+        useJUnitPlatform()
     }
 
     tasks.named<JacocoReport>("jacocoTestReport").configure {
         reports {
             // Enable XML in addition to HTML for CI integration.
-            xml.isEnabled = true
+            xml.required.set(true)
         }
     }
 
@@ -314,12 +310,12 @@ subprojects {
         description = "Generates code coverage report for the funTest task."
         group = "Reporting"
 
-        executionData(funTest.get())
+        executionData(tasks["funTest"])
         sourceSets(sourceSets["main"])
 
         reports {
             // Enable XML in addition to HTML for CI integration.
-            xml.isEnabled = true
+            xml.required.set(true)
         }
     }
 
@@ -331,12 +327,16 @@ subprojects {
     }
 
     tasks.named("check").configure {
-        dependsOn(funTest)
+        dependsOn(tasks["funTest"])
     }
 
     tasks.withType<Jar>().configureEach {
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
+
+        manifest {
+            attributes["Implementation-Version"] = project.version
+        }
     }
 
     tasks.register<Jar>("sourcesJar").configure {

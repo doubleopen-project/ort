@@ -76,17 +76,13 @@ class HttpFileStorageFunTest : WordSpec() {
 
     private val storage = HttpFileStorage("http://${loopback.hostAddress}:$port")
 
-    override fun afterTest(testCase: TestCase, result: TestResult) {
+    override suspend fun afterEach(testCase: TestCase, result: TestResult) {
         handler.requests.clear()
-
-        super.afterTest(testCase, result)
     }
 
-    override fun afterSpec(spec: Spec) {
+    override suspend fun afterSpec(spec: Spec) {
         // Ensure the server is properly stopped even in case of exceptions, but wait at most 5 seconds.
         server.stop(5)
-
-        super.afterSpec(spec)
     }
 
     init {

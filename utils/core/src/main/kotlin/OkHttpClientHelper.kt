@@ -23,6 +23,8 @@ import java.io.File
 import java.io.IOException
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.logging.Level
+import java.util.logging.Logger
 
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -34,21 +36,24 @@ import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionSpec
+import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
 
 import okio.buffer
 import okio.sink
 
 import org.ossreviewtoolkit.utils.common.ArchiveType
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.unquote
 import org.ossreviewtoolkit.utils.common.withoutPrefix
 
 typealias BuilderConfiguration = OkHttpClient.Builder.() -> Unit
 
 /**
- * A HTTP-specific download error that enriches an [IOException] with an additional HTTP error code.
+ * An HTTP-specific download error that enriches an [IOException] with an additional HTTP error code.
  */
 class HttpDownloadError(val code: Int, message: String) : IOException("$message (HTTP code $code)")
 
@@ -56,23 +61,25 @@ class HttpDownloadError(val code: Int, message: String) : IOException("$message 
  * A helper class to manage OkHttp instances backed by distinct cache directories.
  */
 object OkHttpClientHelper {
-    private const val CACHE_DIRECTORY = "cache/http"
-    private const val MAX_CACHE_SIZE_IN_BYTES = 1024L * 1024L * 1024L
-    private const val READ_TIMEOUT_IN_SECONDS = 30L
-
-    private val client by lazy {
-        installAuthenticatorAndProxySelector()
-        buildClient()
-    }
-
-    private val clients = ConcurrentHashMap<BuilderConfiguration, OkHttpClient>()
-
     /**
      * A constant for the "too many requests" HTTP code as HttpURLConnection has none.
      */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
-    private fun buildClient(): OkHttpClient {
+    private const val CACHE_DIRECTORY = "cache/http"
+    private const val MAX_CACHE_SIZE_IN_BYTES = 1024L * 1024L * 1024L
+    private const val READ_TIMEOUT_IN_SECONDS = 30L
+
+    private val clients = ConcurrentHashMap<BuilderConfiguration, OkHttpClient>()
+
+    private val defaultClient by lazy {
+        installAuthenticatorAndProxySelector()
+
+        if (log.delegate.isDebugEnabled) {
+            // Allow to track down leaked connections.
+            Logger.getLogger(OkHttpClient::javaClass.name).level = Level.FINE
+        }
+
         val cacheDirectory = ortDataDirectory.resolve(CACHE_DIRECTORY)
         val cache = Cache(cacheDirectory, MAX_CACHE_SIZE_IN_BYTES)
         val specs = listOf(ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT)
@@ -82,26 +89,21 @@ object OkHttpClientHelper {
         // authentication, but most often "preemptive" authentication via headers is required. For proxy authentication,
         // OkHttp emulates preemptive authentication by sending a fake "OkHttp-Preemptive" response to the reactive
         // proxy authenticator.
-        return OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addNetworkInterceptor { chain ->
                 val request = chain.request()
-                @Suppress("TooGenericExceptionCaught")
-                try {
-                    chain.proceed(
-                        if (request.header("User-Agent") == null) {
-                            request.newBuilder().header("User-Agent", Environment.ORT_USER_AGENT).build()
-                        } else {
-                            request
-                        }
-                    )
-                } catch (e: Exception) {
-                    e.showStackTrace()
-                    log.error {
-                        "HTTP request to '${request.url}' failed with an exception: ${e.collectMessagesAsString()}"
-                    }
+                val requestWithUserAgent = request.takeUnless { it.header("User-Agent") == null }
+                    ?: request.newBuilder().header("User-Agent", Environment.ORT_USER_AGENT).build()
 
-                    throw e
-                }
+                runCatching {
+                    chain.proceed(requestWithUserAgent)
+                }.onFailure {
+                    it.showStackTrace()
+
+                    log.error {
+                        "HTTP request to '${request.url}' failed with an exception: ${it.collectMessagesAsString()}"
+                    }
+                }.getOrThrow()
             }
             .cache(cache)
             .connectionSpecs(specs)
@@ -117,75 +119,62 @@ object OkHttpClientHelper {
      */
     fun buildClient(block: BuilderConfiguration? = null): OkHttpClient =
         block?.let {
-            clients.getOrPut(it) { client.newBuilder().apply(block).build() }
-        } ?: client
+            clients.getOrPut(it) { defaultClient.newBuilder().apply(block).build() }
+        } ?: defaultClient
 
     /**
-     * Execute a [request] using the client for the specified [builder configuration][block].
+     * Execute a [request] using the default client.
      */
-    fun execute(request: Request, block: BuilderConfiguration? = null): Response =
-        buildClient(block).newCall(request).execute()
+    fun execute(request: Request): Response = defaultClient.execute(request)
 
     /**
-     * Asynchronously enqueue a [request] using the client for the specified [builder configuration][block] and await
-     * its response.
+     * Asynchronously enqueue a [request] using the default client and await its response.
      */
-    suspend fun await(request: Request, block: BuilderConfiguration? = null): Response =
-        buildClient(block).newCall(request).await()
+    suspend fun await(request: Request): Response = defaultClient.await(request)
 
     /**
-     * Download from [url] and return a [Result] with a string representing the response body content on success, or a
-     * [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on failure.
+     * Download from [url] using the default client with optional [acceptEncoding] and return a [Result] with the
+     * [Response] and non-nullable [ResponseBody] on success, or a [Result] wrapping an [IOException] (which might be a
+     * [HttpDownloadError]) on failure.
      */
-    fun downloadText(url: String): Result<String> {
-        val request = Request.Builder().get().url(url).build()
-        val response = runCatching { execute(request) }.getOrElse { return Result.failure(it) }
+    fun download(url: String, acceptEncoding: String? = null): Result<Pair<Response, ResponseBody>> =
+        defaultClient.download(url, acceptEncoding)
 
-        log.debug {
-            if (response.cacheResponse != null) {
-                "Retrieved $url from local cache."
-            } else {
-                "Downloaded from $url via network."
-            }
-        }
+    /**
+     * Download from [url] using the default client and return a [Result] with a string representing the response body
+     * content on success, or a [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on failure.
+     */
+    fun downloadText(url: String): Result<String> = defaultClient.downloadText(url)
 
-        return if (response.isSuccessful) {
-            val text = response.body?.use { it.string() }.orEmpty()
-            Result.success(text)
-        } else {
-            Result.failure(HttpDownloadError(response.code, response.message))
-        }
+    /**
+     * Download from [url] using the default client and return a [Result] with a file inside [directory] that holds the
+     * response body content on success, or a [Result] wrapping an [IOException] (which might be a [HttpDownloadError])
+     * on failure.
+     */
+    fun downloadFile(url: String, directory: File): Result<File> = defaultClient.downloadFile(url, directory)
+}
+
+/**
+ * Add a request interceptor that injects basic authorization using the [username] and [password] into the client
+ * builder.
+ */
+fun OkHttpClient.Builder.addBasicAuthorization(username: String, password: String): OkHttpClient.Builder =
+    addInterceptor { chain ->
+        val requestBuilder = chain.request().newBuilder()
+            .header("Authorization", Credentials.basic(username, password))
+
+        chain.proceed(requestBuilder.build())
     }
 
-    /**
-     * Download from [url] and return a [Result] with a file inside [directory] that holds the response body content on
-     * success, or a [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on failure.
-     */
-    fun downloadFile(url: String, directory: File): Result<File> {
-        val request = Request.Builder()
-            // Disable transparent gzip compression, as otherwise we might end up writing a tar file to disk while
-            // expecting to find a tar.gz file, and fail to unpack the archive. See
-            // https://github.com/square/okhttp/blob/parent-3.10.0/okhttp/src/main/java/okhttp3/internal/http/BridgeInterceptor.java#L79
-            .header("Accept-Encoding", "identity")
-            .get()
-            .url(url)
-            .build()
-
-        val response = runCatching { execute(request) }.getOrElse { return Result.failure(it) }
-
-        log.debug {
-            if (response.cacheResponse != null) {
-                "Retrieved $url from local cache."
-            } else {
-                "Downloaded from $url via network."
-            }
-        }
-
-        val body = response.body
-
-        if (!response.isSuccessful || body == null) {
-            return Result.failure(HttpDownloadError(response.code, response.message))
-        }
+/**
+ * Download from [url] and return a [Result] with a file inside [directory] that holds the response body content on
+ * success, or a [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on failure.
+ */
+fun OkHttpClient.downloadFile(url: String, directory: File): Result<File> =
+    // Disable transparent gzip compression, as otherwise we might end up writing a tar file to disk while
+    // expecting to find a tar.gz file, and fail to unpack the archive. See
+    // https://github.com/square/okhttp/blob/parent-3.10.0/okhttp/src/main/java/okhttp3/internal/http/BridgeInterceptor.java#L79
+    download(url, acceptEncoding = "identity").mapCatching { (response, body) ->
 
         // Depending on the server, we may only get a useful target file name when looking at the response
         // header or at a redirected URL. In case of the Crates registry, for example, we want to resolve
@@ -203,12 +192,11 @@ object OkHttpClientHelper {
         val candidateNames = mutableSetOf<String>()
 
         response.headers("Content-disposition").mapNotNullTo(candidateNames) { value ->
-            val filenames = value.split(';').mapNotNull { it.trim().withoutPrefix("filename=") }
-            filenames.firstOrNull()?.removeSurrounding("\"")
+            value.split(';').firstNotNullOfOrNull { it.trim().withoutPrefix("filename=") }?.unquote()
         }
 
-        listOf(response.request.url, request.url).mapTo(candidateNames) {
-            it.pathSegments.last()
+        listOf(response.request.url.toString(), url).mapTo(candidateNames) {
+            it.substringAfterLast('/').substringBefore('?')
         }
 
         check(candidateNames.isNotEmpty())
@@ -223,9 +211,61 @@ object OkHttpClientHelper {
             body.use { target.writeAll(it.source()) }
         }
 
-        return Result.success(file)
+        file
     }
-}
+
+/**
+ * Download from [url] and return a [Result] with a string representing the response body content on success, or a
+ * [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on failure.
+ */
+fun OkHttpClient.downloadText(url: String): Result<String> =
+    download(url).map { (_, body) ->
+        body.use { it.string() }
+    }
+
+/**
+ * Download from [url] with optional [acceptEncoding] and return a [Result] with the [Response] and non-nullable
+ * [ResponseBody] on success, or a [Result] wrapping an [IOException] (which might be a [HttpDownloadError]) on
+ * failure.
+ */
+fun OkHttpClient.download(url: String, acceptEncoding: String? = null): Result<Pair<Response, ResponseBody>> =
+    runCatching {
+        val request = Request.Builder()
+            .apply { acceptEncoding?.also { header("Accept-Encoding", it) } }
+            .get()
+            .url(url)
+            .build()
+
+        execute(request)
+    }.mapCatching { response ->
+        val body = response.body
+
+        if (!response.isSuccessful || body == null) {
+            throw HttpDownloadError(response.code, response.message)
+        }
+
+        response to body
+    }
+
+/**
+ * Execute a [request] using the client.
+ */
+fun OkHttpClient.execute(request: Request): Response =
+    newCall(request).execute().also { response ->
+        OkHttpClientHelper.log.debug {
+            if (response.cacheResponse != null) {
+                "Retrieved ${response.request.url} from local cache."
+            } else {
+                "Downloaded from ${response.request.url} via network."
+            }
+        }
+    }
+
+/**
+ * Asynchronously enqueue a [request] using the client and await its response.
+ */
+suspend fun OkHttpClient.await(request: Request): Response =
+    newCall(request).await()
 
 /**
  * Asynchronously enqueue the [Call]'s request and await its [Response].

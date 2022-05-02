@@ -24,6 +24,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.maps.containExactly
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.beTheSameInstanceAs
@@ -39,7 +40,6 @@ import org.ossreviewtoolkit.model.ProjectAnalyzerResult
 import org.ossreviewtoolkit.model.RootDependencyIndex
 import org.ossreviewtoolkit.model.Scope
 import org.ossreviewtoolkit.model.yamlMapper
-import org.ossreviewtoolkit.utils.test.containExactly
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class AnalyzerResultBuilderTest : WordSpec() {
@@ -193,7 +193,7 @@ class AnalyzerResultBuilderTest : WordSpec() {
                 val serializedResult = yamlMapper.writeValueAsString(result)
                 val deserializedResult = yamlMapper.readValue<AnalyzerResult>(serializedResult)
 
-                deserializedResult.withScopesResolved() shouldBe result.withScopesResolved()
+                deserializedResult.withResolvedScopes() shouldBe result.withResolvedScopes()
             }
         }
 
@@ -220,9 +220,9 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addResult(analyzerResult1)
                     .addResult(analyzerResult2)
                     .build()
-                    .withScopesResolved()
+                    .withResolvedScopes()
 
-                analyzerResult.withScopesResolved() should beTheSameInstanceAs(analyzerResult)
+                analyzerResult.withResolvedScopes() should beTheSameInstanceAs(analyzerResult)
             }
 
             "resolve the dependency information in affected projects" {
@@ -236,7 +236,7 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addDependencyGraph(p2.id.type, graph2)
                     .build()
 
-                val resolvedResult = analyzerResult.withScopesResolved()
+                val resolvedResult = analyzerResult.withResolvedScopes()
 
                 resolvedResult.dependencyGraphs.isEmpty() shouldBe true
 

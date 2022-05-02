@@ -23,10 +23,10 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
+import org.ossreviewtoolkit.utils.common.unquote
 import org.ossreviewtoolkit.utils.spdx.SpdxCompoundExpression
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
 import org.ossreviewtoolkit.utils.spdx.SpdxDeclaredLicenseMapping
-import org.ossreviewtoolkit.utils.spdx.SpdxException
 import org.ossreviewtoolkit.utils.spdx.SpdxExpression
 import org.ossreviewtoolkit.utils.spdx.SpdxOperator
 import org.ossreviewtoolkit.utils.spdx.toSpdx
@@ -53,7 +53,7 @@ object DeclaredLicenseProcessor {
      * Return a declared license that has known URL prefixes and file suffixes stripped, so that the remaining string
      * can more generally be mapped in further processing steps.
      */
-    internal fun preprocess(declaredLicense: String): String {
+    internal fun stripUrlSurroundings(declaredLicense: String): String {
         val licenseWithoutPrefix = urlPrefixesToRemove.fold(declaredLicense) { license, url ->
             license.removePrefix(url)
         }
@@ -71,26 +71,30 @@ object DeclaredLicenseProcessor {
     }
 
     /**
-     * Try to map the [declaredLicense] to an [SpdxExpression] by taking both hard-coded mappings and
-     * [declaredLicenseMapping] into account. As a special case, a license may be mapped to [SpdxConstants.NONE] to mark
+     * Try to map the [declaredLicense] to an [SpdxExpression] by taking both built-in mappings and
+     * [customLicenseMapping] into account. As a special case, a license may be mapped to [SpdxConstants.NONE] to mark
      * it as something that is not a license, like a copyright that was accidentally entered as a license. Return the
      * successfully mapped license expression, or null if the declared license could not be mapped.
      */
     internal fun process(
         declaredLicense: String,
-        declaredLicenseMapping: Map<String, SpdxExpression> = emptyMap()
+        customLicenseMapping: Map<String, SpdxExpression> = emptyMap()
     ): SpdxExpression? {
-        val licenseWithoutPrefixOrSuffix = preprocess(declaredLicense)
-        val mappedLicense = declaredLicenseMapping[licenseWithoutPrefixOrSuffix]
-            ?: SpdxDeclaredLicenseMapping.map(licenseWithoutPrefixOrSuffix)
-            ?: parseLicense(licenseWithoutPrefixOrSuffix)
+        val strippedLicense = stripUrlSurroundings(declaredLicense)
+
+        val mappedLicense = customLicenseMapping[strippedLicense]
+            // When looking up built-in mappings, try some variations of the license name.
+            ?: SpdxDeclaredLicenseMapping.map(strippedLicense)
+            ?: SpdxDeclaredLicenseMapping.map(strippedLicense.unquote())
+            ?: SpdxDeclaredLicenseMapping.map(strippedLicense.removePrefix(SpdxConstants.TAG).trim())
+            ?: parseLicense(strippedLicense)
 
         return mappedLicense?.normalize()?.takeIf { it.isValid() || it.toString() == SpdxConstants.NONE }
     }
 
     /**
-     * Try to map all [declaredLicenses] to a (compound) [SpdxExpression] by taking both hard-coded mappings and
-     * [declaredLicenseMapping] into account. As a special case, a license may be mapped to [SpdxConstants.NONE] to mark
+     * Try to map all [declaredLicenses] to a (compound) [SpdxExpression] by taking both built-in mappings and
+     * [customLicenseMapping] into account. As a special case, a license may be mapped to [SpdxConstants.NONE] to mark
      * it as something that is not a license, like a copyright that was accidentally entered as a license. Multiple
      * declared licenses are reduced to a [SpdxCompoundExpression] using the specified [operator]. Return a
      * [ProcessedDeclaredLicense] which contains the final [SpdxExpression] (or null if none of the declared licenses
@@ -98,21 +102,25 @@ object DeclaredLicenseProcessor {
      */
     fun process(
         declaredLicenses: Set<String>,
-        declaredLicenseMapping: Map<String, SpdxExpression> = emptyMap(),
+        customLicenseMapping: Map<String, SpdxExpression> = emptyMap(),
         operator: SpdxOperator = SpdxOperator.AND
     ): ProcessedDeclaredLicense {
         val processedLicenses = mutableMapOf<String, SpdxExpression>()
         val unmapped = mutableListOf<String>()
 
         declaredLicenses.forEach { declaredLicense ->
-            process(declaredLicense, declaredLicenseMapping)?.let {
+            process(declaredLicense, customLicenseMapping)?.let {
                 processedLicenses[declaredLicense] = it
-            } ?: run { unmapped += declaredLicense }
+            } ?: run {
+                unmapped += declaredLicense
+            }
         }
 
         val spdxExpression = processedLicenses.values.toSet().filter {
             it.toString() != SpdxConstants.NONE
-        }.reduceOrNull { left, right -> SpdxCompoundExpression(left, operator, right) }
+        }.reduceOrNull { left, right ->
+            SpdxCompoundExpression(left, operator, right)
+        }
 
         val mapped = processedLicenses.filterNot { (key, value) ->
             key.removeSurrounding("(", ")") == value.toString()
@@ -122,12 +130,11 @@ object DeclaredLicenseProcessor {
     }
 
     private fun parseLicense(declaredLicense: String) =
-        try {
+        runCatching {
             declaredLicense.toSpdx()
-        } catch (e: SpdxException) {
-            log.debug { "Could not parse declared license '$declaredLicense': ${e.collectMessagesAsString()}" }
-            null
-        }
+        }.onFailure {
+            log.debug { "Could not parse declared license '$declaredLicense': ${it.collectMessagesAsString()}" }
+        }.getOrNull()
 }
 
 data class ProcessedDeclaredLicense(

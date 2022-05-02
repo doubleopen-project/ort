@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
- * Copyright (C) 2021 Bosch.IO GmbH
+ * Copyright (C) 2021-2022 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,9 @@
 package org.ossreviewtoolkit.scanner.scanners.scancode
 
 import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
 import java.time.Instant
 
-import kotlin.io.path.createTempDirectory
-import kotlin.io.path.createTempFile
 import kotlin.math.max
-
-import okhttp3.Request
-
-import okio.buffer
-import okio.sink
 
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.ScannerDetails
@@ -41,18 +32,21 @@ import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.readJsonFile
 import org.ossreviewtoolkit.scanner.AbstractScannerFactory
 import org.ossreviewtoolkit.scanner.BuildConfig
-import org.ossreviewtoolkit.scanner.LocalScanner
-import org.ossreviewtoolkit.scanner.ScanException
+import org.ossreviewtoolkit.scanner.CommandLineScanner
 import org.ossreviewtoolkit.scanner.ScanResultsStorage
-import org.ossreviewtoolkit.scanner.experimental.LocalScannerWrapper
+import org.ossreviewtoolkit.scanner.experimental.AbstractScannerWrapperFactory
+import org.ossreviewtoolkit.scanner.experimental.PathScannerWrapper
+import org.ossreviewtoolkit.scanner.experimental.ScanContext
 import org.ossreviewtoolkit.utils.common.Os
 import org.ossreviewtoolkit.utils.common.ProcessCapture
 import org.ossreviewtoolkit.utils.common.isTrue
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.common.safeMkdirs
 import org.ossreviewtoolkit.utils.common.unpack
-import org.ossreviewtoolkit.utils.core.ORT_NAME
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.core.log
+import org.ossreviewtoolkit.utils.core.ortToolsDirectory
 
 /**
  * A wrapper for [ScanCode](https://github.com/nexB/scancode-toolkit).
@@ -68,11 +62,16 @@ import org.ossreviewtoolkit.utils.core.log
  *   detected licenses. If this option is set to "true", the detected `license_expression` is used instead, which can
  *   contain an SPDX expression.
  */
-class ScanCode(
+class ScanCode internal constructor(
     name: String,
     scannerConfig: ScannerConfiguration,
     downloaderConfig: DownloaderConfiguration
-) : LocalScanner(name, scannerConfig, downloaderConfig), LocalScannerWrapper {
+) : CommandLineScanner(name, scannerConfig, downloaderConfig), PathScannerWrapper {
+    class ScanCodeFactory : AbstractScannerWrapperFactory<ScanCode>(SCANNER_NAME) {
+        override fun create(scannerConfig: ScannerConfiguration, downloaderConfig: DownloaderConfiguration) =
+            ScanCode(scannerName, scannerConfig, downloaderConfig)
+    }
+
     class Factory : AbstractScannerFactory<ScanCode>(SCANNER_NAME) {
         override fun create(scannerConfig: ScannerConfiguration, downloaderConfig: DownloaderConfiguration) =
             ScanCode(scannerName, scannerConfig, downloaderConfig)
@@ -115,13 +114,11 @@ class ScanCode(
     override val expectedVersion = BuildConfig.SCANCODE_VERSION
 
     override val configuration by lazy {
-        mutableListOf<String>().apply {
+        buildList {
             addAll(configurationOptions)
             add(OUTPUT_FORMAT_OPTION)
         }.joinToString(" ")
     }
-
-    override val resultFileExt = "json"
 
     private val scanCodeConfiguration = scannerConfig.options?.get("ScanCode").orEmpty()
 
@@ -131,24 +128,32 @@ class ScanCode(
         ?: DEFAULT_NON_CONFIGURATION_OPTIONS
 
     val commandLineOptions by lazy {
-        mutableListOf<String>().apply {
+        buildList {
             addAll(configurationOptions)
             addAll(nonConfigurationOptions)
-        }.toList()
+        }
     }
 
     override fun command(workingDir: File?) =
         listOfNotNull(workingDir, if (Os.isWindows) "scancode.bat" else "scancode").joinToString(File.separator)
 
     override fun transformVersion(output: String): String {
-        // "scancode --version" returns a string like "ScanCode version 2.0.1.post1.fb67a181" which might be preceded
-        // by a line saying "Configuring ScanCode for first use...".
+        // On first use, the output is prefixed by "Configuring ScanCode for first use...". The version string can be
+        // something like:
+        // ScanCode version 2.0.1.post1.fb67a181
         val prefix = "ScanCode version "
         return output.lineSequence().first { it.startsWith(prefix) }.substring(prefix.length)
     }
 
     override fun bootstrap(): File {
         val versionWithoutHyphen = expectedVersion.replace("-", "")
+        val unpackDir = ortToolsDirectory.resolve(name).resolve(expectedVersion)
+        val scannerDir = unpackDir.resolve("scancode-toolkit-$versionWithoutHyphen")
+
+        if (scannerDir.resolve(command()).isFile) {
+            log.info { "Skipping to bootstrap $name as it was found in $unpackDir." }
+            return scannerDir
+        }
 
         val archive = when {
             // Use the .zip file despite it being slightly larger than the .tar.gz file here as the latter for some
@@ -161,74 +166,61 @@ class ScanCode(
         // locally. For details see https://github.com/square/okhttp/issues/4355#issuecomment-435679393.
         val url = "https://github.com/nexB/scancode-toolkit/archive/$archive"
 
+        // Download ScanCode to a file instead of unpacking directly from the response body as doing so on the > 200 MiB
+        // archive causes issues.
         log.info { "Downloading $scannerName from $url... " }
+        unpackDir.safeMkdirs()
+        val scannerArchive = OkHttpClientHelper.downloadFile(url, unpackDir).getOrThrow()
 
-        val request = Request.Builder().get().url(url).build()
+        log.info { "Unpacking '$scannerArchive' to '$unpackDir'... " }
+        scannerArchive.unpack(unpackDir)
 
-        return OkHttpClientHelper.execute(request).use { response ->
-            val body = response.body
-
-            if (response.code != HttpURLConnection.HTTP_OK || body == null) {
-                throw IOException("Failed to download $scannerName from $url.")
-            }
-
-            if (response.cacheResponse != null) {
-                log.info { "Retrieved $scannerName from local cache." }
-            }
-
-            val scannerArchive = createTempFile(ORT_NAME, "$scannerName-${url.substringAfterLast("/")}").toFile()
-            scannerArchive.sink().buffer().use { it.writeAll(body.source()) }
-
-            val unpackDir = createTempDirectory("$ORT_NAME-$scannerName-$expectedVersion").toFile().apply {
-                deleteOnExit()
-            }
-
-            log.info { "Unpacking '$scannerArchive' to '$unpackDir'... " }
-            scannerArchive.unpack(unpackDir)
-            if (!scannerArchive.delete()) {
-                log.warn { "Unable to delete temporary file '$scannerArchive'." }
-            }
-
-            val scannerDir = unpackDir.resolve("scancode-toolkit-$versionWithoutHyphen")
-
-            scannerDir
+        if (!scannerArchive.delete()) {
+            log.warn { "Unable to delete temporary file '$scannerArchive'." }
         }
+
+        return scannerDir
     }
 
-    override fun scanPathInternal(path: File, resultsFile: File): ScanSummary {
+    override fun scanPathInternal(path: File): ScanSummary {
         val startTime = Instant.now()
 
-        val process = ProcessCapture(
-            scannerPath.absolutePath,
-            *commandLineOptions.toTypedArray(),
-            path.absolutePath,
-            OUTPUT_FORMAT_OPTION,
-            resultsFile.absolutePath
-        )
+        val resultFile = createOrtTempDir().resolve("result.json")
+        val process = runScanCode(path, resultFile)
 
         val endTime = Instant.now()
 
-        if (process.stderr.isNotBlank()) {
-            log.debug { process.stderr }
-        }
+        val result = readJsonFile(resultFile)
+        resultFile.parentFile.safeDeleteRecursively(force = true)
 
-        val result = getRawResult(resultsFile)
         val parseLicenseExpressions = scanCodeConfiguration["parseLicenseExpressions"].isTrue()
         val summary = generateSummary(startTime, endTime, path, result, parseLicenseExpressions)
 
         val issues = summary.issues.toMutableList()
 
-        val hasOnlyMemoryErrors = mapUnknownIssues(issues)
-        val hasOnlyTimeoutErrors = mapTimeoutErrors(issues)
+        mapUnknownIssues(issues)
+        mapTimeoutErrors(issues)
 
-        with(process) {
-            if (isSuccess || hasOnlyMemoryErrors || hasOnlyTimeoutErrors) {
-                return summary.copy(issues = issues)
-            } else {
-                throw ScanException(errorMessage)
-            }
+        return with(process) {
+            if (stderr.isNotBlank()) log.debug { stderr }
+
+            summary.copy(issues = issues)
         }
     }
+
+    /**
+     * Execute ScanCode with the configured arguments to scan the given [path] and produce [resultFile].
+     */
+    internal fun runScanCode(
+        path: File,
+        resultFile: File
+    ) = ProcessCapture(
+        scannerPath.absolutePath,
+        *commandLineOptions.toTypedArray(),
+        path.absolutePath,
+        OUTPUT_FORMAT_OPTION,
+        resultFile.absolutePath
+    )
 
     override fun getVersion(workingDir: File?): String =
         // The release candidate version names lack a hyphen in between the minor version and the extension, e.g.
@@ -242,8 +234,5 @@ class ScanCode(
             }
         }
 
-    override fun getRawResult(resultsFile: File) = readJsonFile(resultsFile)
-
-    override fun scanPath(path: File): ScanSummary =
-        scanPathInternal(path, createOrtTempDir(name).resolve("result.$resultFileExt"))
+    override fun scanPath(path: File, context: ScanContext) = scanPathInternal(path)
 }

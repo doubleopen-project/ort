@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2021 HERE Europe B.V.
- * Copyright (C) 2021 Bosch.IO GmbH
+ * Copyright (C) 2021-2022 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 package org.ossreviewtoolkit.scanner.experimental
 
 import java.io.File
+import java.util.ServiceLoader
 
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.Package
@@ -29,12 +30,24 @@ import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.ScannerDetails
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
+import org.ossreviewtoolkit.model.config.ScannerOptions
 import org.ossreviewtoolkit.scanner.ScannerCriteria
 
 /**
  * The base interface for all types of scanners.
  */
 sealed interface ScannerWrapper {
+    companion object {
+        private val LOADER = ServiceLoader.load(ScannerWrapperFactory::class.java)!!
+
+        /**
+         * The set of all available [scanner wrapper factories][ScannerWrapperFactory] in the classpath, sorted by name.
+         */
+        val ALL: Set<ScannerWrapperFactory> by lazy {
+            LOADER.iterator().asSequence().toSortedSet(compareBy { it.scannerName })
+        }
+    }
+
     /**
      * The name of the scanner.
      */
@@ -52,34 +65,34 @@ sealed interface ScannerWrapper {
      * where _scannerName_ is the name of the scanner and _property_ is the name of a property of the [ScannerCriteria]
      * class. For instance, to specify that a specific minimum version of ScanCode is allowed, set this property:
      * `options.ScanCode.criteria.minScannerVersion=3.0.2`.
+     *
+     * If this property is null it means that the results of this [ScannerWrapper] cannot be stored in a scan storage.
      */
-    val criteria: ScannerCriteria
+    val criteria: ScannerCriteria?
+
+    /**
+     * Filter the scanner-specific options to remove / obfuscate any secrets, like credentials.
+     */
+    fun filterSecretOptions(options: ScannerOptions): ScannerOptions
 }
 
 /**
- * A wrapper interface for remote scanners. A remote scanner is a scanner that is not executed locally but is running on
- * a different machine and can be accessed via a remote interface.
+ * A wrapper interface for scanners that operate on [Package]s and download the package source code themselves.
  */
-sealed interface RemoteScannerWrapper : ScannerWrapper
-
-/**
- * A wrapper interface for remote scanners that operate on [Package]s.
- */
-interface PackageBasedRemoteScannerWrapper : RemoteScannerWrapper {
-    fun scanPackage(pkg: Package): ScanResult
+interface PackageScannerWrapper : ScannerWrapper {
+    fun scanPackage(pkg: Package, context: ScanContext): ScanResult
 }
 
 /**
- * A wrapper interface for remote scanners that operate on [Provenance]s.
+ * A wrapper interface for scanners that operate on [Provenance]s and download the source code themselves.
  */
-interface ProvenanceBasedRemoteScannerWrapper : RemoteScannerWrapper {
-    fun scanProvenance(provenance: KnownProvenance): ScanResult
+interface ProvenanceScannerWrapper : ScannerWrapper {
+    fun scanProvenance(provenance: KnownProvenance, context: ScanContext): ScanResult
 }
 
 /**
- * A wrapper interface for local scanners. A local scanner is a scanner that is running on the same machine and scanning
- * files on the local filesystem.
+ * A wrapper interface for scanners that scan the source code in a path on the local filesystem.
  */
-interface LocalScannerWrapper : ScannerWrapper {
-    fun scanPath(path: File): ScanSummary
+interface PathScannerWrapper : ScannerWrapper {
+    fun scanPath(path: File, context: ScanContext): ScanSummary
 }

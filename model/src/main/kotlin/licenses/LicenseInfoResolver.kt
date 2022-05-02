@@ -21,8 +21,6 @@ package org.ossreviewtoolkit.model.licenses
 
 import java.util.concurrent.ConcurrentHashMap
 
-import kotlin.io.path.createTempDirectory
-
 import org.ossreviewtoolkit.model.CopyrightFinding
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.KnownProvenance
@@ -39,7 +37,7 @@ import org.ossreviewtoolkit.model.utils.FindingCurationMatcher
 import org.ossreviewtoolkit.model.utils.FindingsMatcher
 import org.ossreviewtoolkit.model.utils.RootLicenseMatcher
 import org.ossreviewtoolkit.model.utils.prependPath
-import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
 
 class LicenseInfoResolver(
@@ -99,23 +97,25 @@ class LicenseInfoResolver(
                 )
 
                 if (addAuthorsToCopyrights && licenseInfo.declaredLicenseInfo.authors.isNotEmpty()) {
-                    locations.add(ResolvedLicenseLocation(
-                        provenance = UnknownProvenance,
-                        location = UNDEFINED_TEXT_LOCATION,
-                        appliedCuration = null,
-                        matchingPathExcludes = emptyList(),
-                        copyrights = licenseInfo.declaredLicenseInfo.authors.mapTo(mutableSetOf()) { author ->
-                            val statement = "Copyright (C) $author".takeUnless {
-                                author.contains("Copyright", ignoreCase = true)
-                            } ?: author
+                    locations.add(
+                        ResolvedLicenseLocation(
+                            provenance = UnknownProvenance,
+                            location = UNDEFINED_TEXT_LOCATION,
+                            appliedCuration = null,
+                            matchingPathExcludes = emptyList(),
+                            copyrights = licenseInfo.declaredLicenseInfo.authors.mapTo(mutableSetOf()) { author ->
+                                val statement = "Copyright (C) $author".takeUnless {
+                                    author.contains("Copyright", ignoreCase = true)
+                                } ?: author
 
-                            ResolvedCopyrightFinding(
-                                statement = statement,
-                                location = UNDEFINED_TEXT_LOCATION,
-                                matchingPathExcludes = emptyList()
-                            )
-                        }
-                    ))
+                                ResolvedCopyrightFinding(
+                                    statement = statement,
+                                    location = UNDEFINED_TEXT_LOCATION,
+                                    matchingPathExcludes = emptyList()
+                                )
+                            }
+                        )
+                    )
                 }
             }
         }
@@ -255,7 +255,7 @@ class LicenseInfoResolver(
         licenseInfo.flatMapTo(mutableSetOf()) { resolvedLicense ->
             resolvedLicense.locations.map { it.provenance }
         }.forEach { provenance ->
-            val archiveDir = createTempDirectory("$ORT_NAME-archive").toFile().apply { deleteOnExit() }
+            val archiveDir = createOrtTempDir("archive").apply { deleteOnExit() }
 
             when (provenance) {
                 is UnknownProvenance -> return@forEach

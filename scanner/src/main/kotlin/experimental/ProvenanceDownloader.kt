@@ -22,6 +22,8 @@ package org.ossreviewtoolkit.scanner.experimental
 
 import java.io.File
 
+import kotlinx.coroutines.runBlocking
+
 import org.ossreviewtoolkit.downloader.DownloadException
 import org.ossreviewtoolkit.downloader.Downloader
 import org.ossreviewtoolkit.model.ArtifactProvenance
@@ -29,26 +31,36 @@ import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
+import org.ossreviewtoolkit.utils.common.safeCopyRecursively
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
 
 /**
  * An interface that provides functionality to download source code.
  */
 interface ProvenanceDownloader {
     /**
-     * Download the source code specified by the provided [provenance] to the [downloadDir]. Throws a
-     * [DownloadException] if the download fails.
+     * Download the source code specified by the provided [provenance] and return the path to the directory that
+     * contains the downloaded source code.
+     *
+     * Throws a [DownloadException] if the download fails.
      */
-    fun download(provenance: KnownProvenance, downloadDir: File)
+    fun download(provenance: KnownProvenance): File
 }
 
 /**
  * An implementation of [ProvenanceDownloader] which uses the download functions from the [Downloader] class. As these
  * functions require a [Package] to be provided, this implementation creates empty fake packages.
  */
-class DefaultProvenanceDownloader(config: DownloaderConfiguration) : ProvenanceDownloader {
+class DefaultProvenanceDownloader(
+    config: DownloaderConfiguration,
+    private val workingTreeCache: WorkingTreeCache
+) : ProvenanceDownloader {
     private val downloader = Downloader(config)
 
-    override fun download(provenance: KnownProvenance, downloadDir: File) {
+    override fun download(provenance: KnownProvenance): File {
+        val downloadDir = createOrtTempDir()
+
         when (provenance) {
             // TODO: Add dedicated download functions for VcsInfo and RemoteArtifact to the Downloader.
             is ArtifactProvenance -> {
@@ -57,11 +69,26 @@ class DefaultProvenanceDownloader(config: DownloaderConfiguration) : ProvenanceD
             }
 
             is RepositoryProvenance -> {
-                val pkg = Package.EMPTY.copy(
-                    vcsProcessed = provenance.vcsInfo.copy(revision = provenance.resolvedRevision)
-                )
-                downloader.downloadFromVcs(pkg, downloadDir, recursive = false)
+                runBlocking { downloadFromVcs(provenance, downloadDir) }
             }
+        }
+
+        return downloadDir
+    }
+
+    private suspend fun downloadFromVcs(provenance: RepositoryProvenance, downloadDir: File) {
+        workingTreeCache.use(provenance.vcsInfo) { vcs, workingTree ->
+            vcs.updateWorkingTree(workingTree, provenance.resolvedRevision, recursive = false)
+
+            // Make sure that all nested repositories are removed. Even though we do not clone recursively above, nested
+            // repositories could exist if the same working tree was previously cloned recursively.
+            workingTree.getNested().forEach { (path, _) ->
+                workingTree.getRootPath().resolve(path).safeDeleteRecursively(force = true)
+            }
+
+            // We need to make a copy of the working tree, because it could be used by another coroutine after this
+            // call has finished.
+            workingTree.getRootPath().safeCopyRecursively(downloadDir, overwrite = true)
         }
     }
 }

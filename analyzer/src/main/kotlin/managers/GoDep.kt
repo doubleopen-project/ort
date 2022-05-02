@@ -24,12 +24,10 @@ import com.moandjiezana.toml.Toml
 import java.io.File
 import java.io.IOException
 import java.net.URI
-import java.nio.file.Paths
-
-import kotlin.io.path.createTempDirectory
 
 import org.ossreviewtoolkit.analyzer.AbstractPackageManagerFactory
 import org.ossreviewtoolkit.analyzer.PackageManager
+import org.ossreviewtoolkit.downloader.VcsHost
 import org.ossreviewtoolkit.downloader.VersionControlSystem
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.OrtIssue
@@ -41,6 +39,7 @@ import org.ossreviewtoolkit.model.ProjectAnalyzerResult
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.Scope
 import org.ossreviewtoolkit.model.VcsInfo
+import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
@@ -51,7 +50,7 @@ import org.ossreviewtoolkit.utils.common.realFile
 import org.ossreviewtoolkit.utils.common.safeCopyRecursively
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.common.toUri
-import org.ossreviewtoolkit.utils.core.ORT_NAME
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.core.log
 import org.ossreviewtoolkit.utils.core.showStackTrace
 
@@ -92,12 +91,12 @@ class GoDep(
     override fun getVersionArguments() = "version"
 
     override fun transformVersion(output: String) =
-        output.lineSequence().first { it.contains("version") }.substringAfter(':').trim().removePrefix("v")
+        output.lineSequence().first { "version" in it }.substringAfter(':').trim().removePrefix("v")
 
     override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
         val projectDir = resolveProjectRoot(definitionFile)
         val projectVcs = processProjectVcs(projectDir)
-        val gopath = createTempDirectory("$ORT_NAME-${projectDir.name}-gopath").toFile()
+        val gopath = createOrtTempDir("${projectDir.name}-gopath")
         val workingDir = setUpWorkspace(projectDir, projectVcs, gopath)
 
         GO_LEGACY_MANIFESTS[definitionFile.name]?.let { lockfileName ->
@@ -184,9 +183,14 @@ class GoDep(
     }
 
     fun deduceImportPath(projectDir: File, vcs: VcsInfo, gopath: File): File =
-        vcs.url.toUri { uri ->
-            Paths.get(gopath.path, "src", uri.host, uri.path)
-        }.getOrDefault(Paths.get(gopath.path, "src", projectDir.name)).toFile()
+        gopath.resolve("src").let { src ->
+            val uri = vcs.url.toUri().getOrNull()
+            if (uri?.host != null) {
+                src.resolve("${uri.host}/${uri.path}")
+            } else {
+                src.resolve(projectDir.name)
+            }
+        }
 
     private fun resolveProjectRoot(definitionFile: File) =
         when (definitionFile.name) {
@@ -255,7 +259,10 @@ class GoDep(
     }
 
     private fun resolveVcsInfo(importPath: String, revision: String, gopath: File): VcsInfo {
-        val pc = ProcessCapture("go", "get", "-d", importPath, environment = mapOf("GOPATH" to gopath.path))
+        val pc = ProcessCapture(
+            "go", "get", "-d", importPath,
+            environment = mapOf("GOPATH" to gopath.path, "GO111MODULE" to "off")
+        )
 
         // HACK Some failure modes from "go get" can be ignored:
         // 1. repositories that don't have .go files in the root directory
@@ -272,9 +279,16 @@ class GoDep(
             if (!errorMessagesToIgnore.any { it in msg }) throw IOException(msg)
         }
 
-        val repoRoot = Paths.get(gopath.path, "src", importPath).toFile()
+        val repoRoot = gopath.resolve("src/$importPath")
+
+        // The "processProjectVcs()" function should always be able to deduce VCS information from the working tree
+        // created by "go get". However, if that fails for whatever reason, fall back to guessing VCS information from
+        // the "importPath" (which usually resembles a URL).
+        val fallbackVcsInfo = VcsHost.parseUrl("https://$importPath").takeIf {
+            it.type != VcsType.UNKNOWN
+        } ?: VcsInfo.EMPTY
 
         // We want the revision recorded in Gopkg.lock contained in "vcs", not the one "go get" fetched.
-        return processProjectVcs(repoRoot).copy(revision = revision)
+        return processProjectVcs(repoRoot, fallbackVcsInfo).copy(revision = revision)
     }
 }

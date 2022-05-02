@@ -26,6 +26,7 @@ import java.time.Instant
 import org.ossreviewtoolkit.advisor.AbstractAdviceProviderFactory
 import org.ossreviewtoolkit.advisor.AdviceProvider
 import org.ossreviewtoolkit.clients.nexusiq.NexusIqService
+import org.ossreviewtoolkit.model.AdvisorCapability
 import org.ossreviewtoolkit.model.AdvisorDetails
 import org.ossreviewtoolkit.model.AdvisorResult
 import org.ossreviewtoolkit.model.AdvisorSummary
@@ -37,6 +38,7 @@ import org.ossreviewtoolkit.model.config.NexusIqConfiguration
 import org.ossreviewtoolkit.model.utils.PurlType
 import org.ossreviewtoolkit.model.utils.getPurlType
 import org.ossreviewtoolkit.model.utils.toPurl
+import org.ossreviewtoolkit.utils.common.enumSetOf
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.core.log
 
@@ -45,7 +47,7 @@ import retrofit2.HttpException
 /**
  * The number of packages to request from Nexus IQ in one request.
  */
-private const val REQUEST_CHUNK_SIZE = 128
+private const val BULK_REQUEST_SIZE = 128
 
 /**
  * A wrapper for [Nexus IQ Server](https://help.sonatype.com/iqserver) security vulnerability data.
@@ -54,6 +56,8 @@ class NexusIq(name: String, private val nexusIqConfig: NexusIqConfiguration) : A
     class Factory : AbstractAdviceProviderFactory<NexusIq>("NexusIQ") {
         override fun create(config: AdvisorConfiguration) = NexusIq(providerName, config.forProvider { nexusIq })
     }
+
+    override val details: AdvisorDetails = AdvisorDetails(providerName, enumSetOf(AdvisorCapability.VULNERABILITIES))
 
     private val service by lazy {
         NexusIqService.create(
@@ -83,7 +87,7 @@ class NexusIq(name: String, private val nexusIqConfig: NexusIqConfiguration) : A
         return try {
             val componentDetails = mutableMapOf<String, NexusIqService.ComponentDetails>()
 
-            components.chunked(REQUEST_CHUNK_SIZE).forEach { chunk ->
+            components.chunked(BULK_REQUEST_SIZE).forEach { chunk ->
                 val requestResults = getComponentDetails(service, chunk).componentDetails.associateBy {
                     it.component.packageUrl.substringBefore("?")
                 }
@@ -94,12 +98,12 @@ class NexusIq(name: String, private val nexusIqConfig: NexusIqConfiguration) : A
             val endTime = Instant.now()
 
             packages.mapNotNullTo(mutableListOf()) { pkg ->
-                componentDetails[pkg.id.toPurl()]?.let { details ->
+                componentDetails[pkg.id.toPurl()]?.let { pkgDetails ->
                     pkg to listOf(
                         AdvisorResult(
-                            AdvisorDetails(providerName),
+                            details,
                             AdvisorSummary(startTime, endTime),
-                            vulnerabilities = details.securityData.securityIssues.map { it.toVulnerability() }
+                            vulnerabilities = pkgDetails.securityData.securityIssues.map { it.toVulnerability() }
                         )
                     )
                 }

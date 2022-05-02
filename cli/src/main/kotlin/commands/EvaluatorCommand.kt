@@ -73,6 +73,7 @@ import org.ossreviewtoolkit.model.utils.mergeLabels
 import org.ossreviewtoolkit.utils.common.expandTilde
 import org.ossreviewtoolkit.utils.common.safeMkdirs
 import org.ossreviewtoolkit.utils.core.ORT_COPYRIGHT_GARBAGE_FILENAME
+import org.ossreviewtoolkit.utils.core.ORT_EVALUATOR_RULES_FILENAME
 import org.ossreviewtoolkit.utils.core.ORT_LICENSE_CLASSIFICATIONS_FILENAME
 import org.ossreviewtoolkit.utils.core.ORT_REPO_CONFIG_FILENAME
 import org.ossreviewtoolkit.utils.core.ORT_RESOLUTIONS_FILENAME
@@ -210,9 +211,14 @@ class EvaluatorCommand : CliktCommand(name = "evaluate", help = "Evaluate ORT re
                 licenseClassificationsFile,
                 packageCurationsFile,
                 repositoryConfigurationFile
-        ).map { it.absolutePath }
-        println("The following configuration files are used:")
-        println("\t" + configurationFiles.joinToString("\n\t"))
+        )
+
+        val configurationInfo = configurationFiles.joinToString("\n\t") { file ->
+            file.absolutePath + " (does not exist)".takeIf { !file.exists() }.orEmpty()
+        }
+
+        println("Looking for evaluator-specific configuration in the following files and directories:")
+        println("\t" + configurationInfo)
 
         // Fail early if output files exist and must not be overwritten.
         val outputFiles = mutableSetOf<File>()
@@ -235,12 +241,12 @@ class EvaluatorCommand : CliktCommand(name = "evaluate", help = "Evaluate ORT re
 
             is StringType -> {
                 val rulesResource = (rules as StringType).string
-                javaClass.classLoader.getResource(rulesResource)?.readText()
+                javaClass.getResource(rulesResource)?.readText()
                     ?: throw UsageError("Invalid rules resource '$rulesResource'.")
             }
 
             null -> {
-                val rulesFile = ortConfigDirectory.resolve("rules.kts")
+                val rulesFile = ortConfigDirectory.resolve(ORT_EVALUATOR_RULES_FILENAME)
 
                 if (!rulesFile.isFile) {
                     throw UsageError("No rule option specified and no default rule found at '$rulesFile'.")
@@ -275,15 +281,21 @@ class EvaluatorCommand : CliktCommand(name = "evaluate", help = "Evaluate ORT re
             ortResultInput = ortResultInput.replacePackageCurations(curations)
         }
 
-        val repositoryPackageConfigurations = ortResultInput.repository.config.packageConfigurations
-        val optionPackageConfigurations = packageConfigurationOption.createProvider().getPackageConfigurations()
+        val config = globalOptionsForSubcommands.config
 
-        val packageConfigurationProvider = SimplePackageConfigurationProvider(
-            optionPackageConfigurations + repositoryPackageConfigurations
-        )
+        val packageConfigurations = packageConfigurationOption.createProvider().getPackageConfigurations()
+            .toMutableSet()
+        val repositoryPackageConfigurations = ortResultInput.repository.config.packageConfigurations
+
+        if (config.enableRepositoryPackageConfigurations) {
+            packageConfigurations += repositoryPackageConfigurations
+        } else if (repositoryPackageConfigurations.isNotEmpty()) {
+            log.warn { "Local package configurations were not applied because the feature is not enabled." }
+        }
+
+        val packageConfigurationProvider = SimplePackageConfigurationProvider(packageConfigurations)
         val copyrightGarbage = copyrightGarbageFile.takeIf { it.isFile }?.readValue<CopyrightGarbage>().orEmpty()
 
-        val config = globalOptionsForSubcommands.config
         val licenseInfoResolver = LicenseInfoResolver(
             provider = DefaultLicenseInfoProvider(ortResultInput, packageConfigurationProvider),
             copyrightGarbage = copyrightGarbage,

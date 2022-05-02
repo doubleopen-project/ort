@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2021 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +21,9 @@
 package org.ossreviewtoolkit.scanner.experimental
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.spec.Spec
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.maps.containExactly
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
@@ -33,10 +36,14 @@ import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.utils.common.Os
-import org.ossreviewtoolkit.utils.test.containExactly
 
 class DefaultNestedProvenanceResolverFunTest : WordSpec() {
-    private val resolver = DefaultNestedProvenanceResolver()
+    private val workingTreeCache = DefaultWorkingTreeCache()
+    private val resolver = DefaultNestedProvenanceResolver(DummyNestedProvenanceStorage(), workingTreeCache)
+
+    override suspend fun afterSpec(spec: Spec) {
+        workingTreeCache.shutdown()
+    }
 
     init {
         "Resolving an artifact provenance" should {
@@ -120,9 +127,8 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 val provenance = RepositoryProvenance(
                     vcsInfo = VcsInfo(
                         type = VcsType.GIT_REPO,
-                        url = "https://github.com/oss-review-toolkit/ort-test-data-git-repo.git",
-                        revision = "31588aa8f8555474e1c3c66a359ec99e4cd4b1fa",
-                        path = "manifest.xml"
+                        url = "https://github.com/oss-review-toolkit/ort-test-data-git-repo.git?manifest=manifest.xml",
+                        revision = "31588aa8f8555474e1c3c66a359ec99e4cd4b1fa"
                     ),
                     resolvedRevision = "31588aa8f8555474e1c3c66a359ec99e4cd4b1fa"
                 )
@@ -198,5 +204,12 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 }
             }
         }
+    }
+}
+
+private class DummyNestedProvenanceStorage : NestedProvenanceStorage {
+    override fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? = null
+    override fun putNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
+        /** no-op */
     }
 }

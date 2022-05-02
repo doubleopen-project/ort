@@ -21,11 +21,9 @@ package org.ossreviewtoolkit.advisor.advisors
 
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
-import com.github.tomakehurst.wiremock.client.WireMock.configureFor
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.equalToJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
-import com.github.tomakehurst.wiremock.client.WireMock.stubFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
@@ -40,12 +38,15 @@ import io.kotest.matchers.shouldNot
 
 import java.net.URI
 
+import org.ossreviewtoolkit.model.AdvisorCapability
+import org.ossreviewtoolkit.model.AdvisorDetails
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.Vulnerability
 import org.ossreviewtoolkit.model.VulnerabilityReference
 import org.ossreviewtoolkit.model.utils.toPurl
+import org.ossreviewtoolkit.utils.common.enumSetOf
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class OssIndexTest : WordSpec({
@@ -57,14 +58,13 @@ class OssIndexTest : WordSpec({
 
     beforeSpec {
         server.start()
-        configureFor(server.port())
     }
 
     afterSpec {
         server.stop()
     }
 
-    beforeTest {
+    beforeEach {
         server.resetAll()
     }
 
@@ -81,7 +81,7 @@ class OssIndexTest : WordSpec({
             result[ID_JUNIT] shouldNotBeNull {
                 this should haveSize(1)
                 with(single()) {
-                    advisor.name shouldBe ADVISOR_NAME
+                    advisor shouldBe ossIndex.details
                     vulnerabilities should containExactlyInAnyOrder(
                         Vulnerability(
                             id = "CVE-2020-15250",
@@ -109,7 +109,7 @@ class OssIndexTest : WordSpec({
         }
 
         "handle a failure response from the server" {
-            stubFor(
+            server.stubFor(
                 post(urlPathEqualTo(COMPONENTS_REQUEST_URL))
                     .willReturn(
                         aResponse().withStatus(500)
@@ -127,12 +127,19 @@ class OssIndexTest : WordSpec({
                     val pkgResults = getValue(pkg)
                     pkgResults shouldHaveSize 1
                     val pkgResult = pkgResults[0]
+                    pkgResult.advisor shouldBe ossIndex.details
                     pkgResult.vulnerabilities should io.kotest.matchers.collections.beEmpty()
                     pkgResult.summary.issues shouldHaveSize 1
                     val issue = pkgResult.summary.issues[0]
                     issue.severity shouldBe Severity.ERROR
                 }
             }
+        }
+
+        "provide correct details" {
+            val ossIndex = OssIndex(ADVISOR_NAME, "http://localhost:${server.port()}")
+
+            ossIndex.details shouldBe AdvisorDetails(ADVISOR_NAME, enumSetOf(AdvisorCapability.VULNERABILITIES))
         }
     }
 })
@@ -146,7 +153,7 @@ private val ID_HAMCREST = Identifier("Maven:org.hamcrest:hamcrest-core:1.3")
 private val ID_JUNIT = Identifier("Maven:junit:junit:4.12")
 
 private const val COMPONENTS_REQUEST_URL = "/api/v3/component-report"
-private val COMPONENTS_REQUEST_IDS = listOf(ID_HAMCREST, ID_JUNIT)
+private val COMPONENTS_REQUEST_IDS = setOf(ID_HAMCREST, ID_JUNIT)
 
 private val COMPONENTS_REQUEST_JSON =
     COMPONENTS_REQUEST_IDS.joinToString(prefix = "{ \"coordinates\": [", postfix = "] }") { "\"${it.toPurl()}\"" }

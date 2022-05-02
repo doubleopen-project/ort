@@ -22,7 +22,8 @@ package org.ossreviewtoolkit.utils.test
 import com.fasterxml.jackson.module.kotlin.readValue
 
 import io.kotest.matchers.Matcher
-import io.kotest.matchers.maps.MapContainsMatcher
+import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.neverNullMatcher
 
 import java.io.File
 import java.time.Instant
@@ -33,7 +34,7 @@ import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.mapper
 import org.ossreviewtoolkit.model.yamlMapper
 
-val DEFAULT_ANALYZER_CONFIGURATION = AnalyzerConfiguration(ignoreToolVersions = false, allowDynamicVersions = false)
+val DEFAULT_ANALYZER_CONFIGURATION = AnalyzerConfiguration(allowDynamicVersions = false)
 val DEFAULT_REPOSITORY_CONFIGURATION = RepositoryConfiguration()
 
 val USER_DIR = File(System.getProperty("user.dir"))
@@ -44,8 +45,6 @@ private val ENV_VAR_REGEX = Regex("(\\s{4}variables:)\\n(?:\\s{6}.+)+")
 private val ENV_TOOL_REGEX = Regex("(\\s{4}tool_versions:)\\n(?:\\s{6}.+)+")
 private val START_AND_END_TIME_REGEX = Regex("((start|end)_time): \".*\"")
 private val TIMESTAMP_REGEX = Regex("(timestamp): \".*\"")
-
-fun <K, V> containExactly(vararg expected: Pair<K, V>): Matcher<Map<K, V>> = MapContainsMatcher(expected.toMap())
 
 fun patchExpectedResult(
     result: File,
@@ -99,3 +98,20 @@ fun patchActualResultObject(result: OrtResult, patchStartAndEndTime: Boolean = f
 fun readOrtResult(file: String) = readOrtResult(File(file))
 
 fun readOrtResult(file: File) = file.mapper().readValue<OrtResult>(patchExpectedResult(file))
+
+/**
+ * A helper function to create a custom matcher that compares an [expected] collection to a collection obtained by
+ * [transform] using the provided [matcher].
+ */
+fun <T, U> transformingCollectionMatcher(
+    expected: Collection<U>,
+    matcher: (Collection<U>) -> Matcher<Collection<U>>,
+    transform: (T) -> Collection<U>
+): Matcher<T?> = neverNullMatcher { value -> matcher(expected).test(transform(value)) }
+
+/**
+ * A helper function to create custom matchers that assert that the collection obtained by [transform] is empty.
+ */
+fun <T, U> transformingCollectionEmptyMatcher(
+    transform: (T) -> Collection<U>
+): Matcher<T?> = neverNullMatcher { value -> beEmpty<U>().test(transform(value)) }

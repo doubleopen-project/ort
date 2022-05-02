@@ -65,6 +65,14 @@ val ortDataDirectory by lazy {
  */
 var printStackTrace = false
 
+private val versionSeparators = listOf('-', '_', '.')
+private val versionSeparatorsPattern = versionSeparators.joinToString("", "[", "]")
+
+private val ignorablePrefixSuffixPattern = listOf("rel", "release", "final").joinToString("|", "(", ")")
+private val ignorablePrefixSuffixRegex = Regex(
+    "(^$ignorablePrefixSuffixPattern$versionSeparatorsPattern|$versionSeparatorsPattern$ignorablePrefixSuffixPattern$)"
+)
+
 /**
  * Filter a list of [names] to include only those that likely belong to the given [version] of an optional [project].
  */
@@ -76,8 +84,7 @@ fun filterVersionNames(version: String, names: List<String>, project: String? = 
     if (fullMatches.isNotEmpty()) return fullMatches
 
     // The list of supported version separators.
-    val versionSeparators = listOf('-', '_', '.')
-    val versionHasSeparator = versionSeparators.any { version.contains(it) }
+    val versionHasSeparator = versionSeparators.any { it in version }
 
     // Create variants of the version string to recognize.
     data class VersionVariant(val name: String, val separators: List<Char>)
@@ -91,18 +98,18 @@ fun filterVersionNames(version: String, names: List<String>, project: String? = 
     }
 
     val filteredNames = names.filter {
-        val name = it.lowercase()
+        val name = it.lowercase().replace(ignorablePrefixSuffixRegex, "")
 
         versionVariants.any { versionVariant ->
             // Allow to ignore suffixes in names that are separated by something else than the current separator, e.g.
             // for version "3.3.1" accept "3.3.1-npm-packages" but not "3.3.1.0".
-            val hasIgnorableSuffix = name.withoutPrefix(versionVariant.name)?.let { tail ->
+            val hasIgnorableSuffixOnly = name.withoutPrefix(versionVariant.name)?.let { tail ->
                 tail.firstOrNull() !in versionVariant.separators
             } ?: false
 
             // Allow to ignore prefixes in names that are separated by something else than the current separator, e.g.
             // for version "0.10" accept "docutils-0.10" but not "1.0.10".
-            val hasIgnorablePrefix = name.withoutSuffix(versionVariant.name)?.let { head ->
+            val hasIgnorablePrefixOnly = name.withoutSuffix(versionVariant.name)?.let { head ->
                 val last = head.lastOrNull()
                 val forelast = head.dropLast(1).lastOrNull()
 
@@ -118,7 +125,7 @@ fun filterVersionNames(version: String, names: List<String>, project: String? = 
                         || (last == 'v' && (forelast == null || forelast in currentSeparators))
             } ?: false
 
-            hasIgnorableSuffix || hasIgnorablePrefix
+            hasIgnorableSuffixOnly || hasIgnorablePrefixOnly
         }
     }
 
@@ -197,14 +204,16 @@ fun normalizeVcsUrl(vcsUrl: String): String {
                     path.endsWith(".git") || path.count { it == '/' } != 2
                 } ?: "${uri.path}.git"
 
+                val query = uri.query?.takeIf { it.isNotBlank() }?.let { "?$it" }.orEmpty()
+
                 return if (uri.scheme == "ssh") {
                     // Ensure the generic "git" user name is specified.
                     val host = uri.authority.let { if (it.startsWith("git@")) it else "git@$it" }
-                    "ssh://$host$path"
+                    "ssh://$host$path$query"
                 } else {
                     // Remove any user name and "www" prefix.
                     val host = uri.authority.substringAfter('@').removePrefix("www.")
-                    "https://$host$path"
+                    "https://$host$path$query"
                 }
             }
         }

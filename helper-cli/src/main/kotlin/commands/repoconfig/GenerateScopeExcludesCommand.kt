@@ -130,8 +130,8 @@ private fun getScopeExcludesForPackageManager(packageManagerName: String): List<
             ),
             ScopeExclude(
                 pattern = "checkstyle",
-                reason = ScopeExcludeReason.BUILD_DEPENDENCY_OF,
-                comment = "Packages for code styling checks (testing) only."
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
             ),
             ScopeExclude(
                 pattern = "detekt",
@@ -139,9 +139,14 @@ private fun getScopeExcludesForPackageManager(packageManagerName: String): List<
                 comment = "Packages for static code analysis (testing) only."
             ),
             ScopeExclude(
+                pattern = "dokka.*",
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for the Dokka documentation engine."
+            ),
+            ScopeExclude(
                 pattern = "findbugs",
-                reason = ScopeExcludeReason.BUILD_DEPENDENCY_OF,
-                comment = "Packages for static code analysis (testing) only."
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
             ),
             ScopeExclude(
                 pattern = "jacocoAgent",
@@ -175,18 +180,23 @@ private fun getScopeExcludesForPackageManager(packageManagerName: String): List<
             ),
             ScopeExclude(
                 pattern = "ktlint",
-                reason = ScopeExcludeReason.TEST_DEPENDENCY_OF,
-                comment = "Packages for code linting (testing) only."
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
             ),
             ScopeExclude(
                 pattern = "lint.*",
-                reason = ScopeExcludeReason.TEST_DEPENDENCY_OF,
-                comment = "Packages for code linting (testing) only."
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
             ),
             ScopeExclude(
                 pattern = "pmd",
-                reason = ScopeExcludeReason.TEST_DEPENDENCY_OF,
-                comment = "Packages for code analysis (testing) only."
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
+            ),
+            ScopeExclude(
+                pattern = "spotbugs",
+                reason = ScopeExcludeReason.DEV_DEPENDENCY_OF,
+                comment = "Packages for static code analysis only."
             ),
             ScopeExclude(
                 pattern = "test.*",

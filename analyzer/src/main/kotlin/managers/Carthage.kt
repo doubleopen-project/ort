@@ -22,7 +22,6 @@ package org.ossreviewtoolkit.analyzer.managers
 import com.fasterxml.jackson.module.kotlin.readValue
 
 import java.io.File
-import java.net.URI
 import java.net.URL
 import java.util.SortedSet
 
@@ -42,6 +41,7 @@ import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.jsonMapper
 import org.ossreviewtoolkit.model.orEmpty
+import org.ossreviewtoolkit.utils.common.unquote
 import org.ossreviewtoolkit.utils.core.normalizeVcsUrl
 
 /**
@@ -100,7 +100,7 @@ class Carthage(
         val workingTree = VersionControlSystem.forDirectory(workingDir)
         val vcsInfo = workingTree?.getInfo().orEmpty()
         val normalizedVcsUrl = normalizeVcsUrl(vcsInfo.url)
-        val vcsHost = VcsHost.toVcsHost(URI(normalizedVcsUrl))
+        val vcsHost = VcsHost.fromUrl(normalizedVcsUrl)
 
         return ProjectInfo(
             namespace = vcsHost?.getUserOrOrganization(normalizedVcsUrl),
@@ -131,8 +131,8 @@ class Carthage(
         }
 
         val type = DependencyType.valueOf(split[0].uppercase())
-        val id = split[1].removeSurrounding("\"")
-        val revision = split[2].removeSurrounding("\"")
+        val id = split[1].unquote()
+        val revision = split[2].unquote()
 
         return when (type) {
             DependencyType.GITHUB -> {
@@ -178,9 +178,9 @@ class Carthage(
     }
 
     private fun createPackageFromGenericGitUrl(projectUrl: String, revision: String): Package {
-        val vcsInfoFromUrl = VcsHost.toVcsInfo(projectUrl)
+        val vcsInfoFromUrl = VcsHost.parseUrl(projectUrl)
         val vcsInfo = vcsInfoFromUrl.copy(revision = revision)
-        val vcsHost = VcsHost.toVcsHost(URI(vcsInfo.url))
+        val vcsHost = VcsHost.fromUrl(vcsInfo.url)
 
         return Package(
             id = Identifier(

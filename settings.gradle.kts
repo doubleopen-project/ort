@@ -37,8 +37,10 @@ pluginManagement {
                 gradle.rootProject.properties[versionPropertyName]?.let { version ->
                     logger.info("Setting '${requested.id.id}' plugin version to $version.")
                     useVersion(version.toString())
-                } ?: logger.warn("No version specified for plugin '${requested.id.id}' and property " +
-                        "'$versionPropertyName' does not exist.")
+                } ?: logger.warn(
+                    "No version specified for plugin '${requested.id.id}' and property '$versionPropertyName' does " +
+                            "not exist."
+                )
             }
         }
     }
@@ -54,10 +56,13 @@ include(":clients:fossid-webapp")
 include(":clients:github-graphql")
 include(":clients:nexus-iq")
 include(":clients:oss-index")
+include(":clients:scanoss")
 include(":clients:vulnerable-code")
 include(":detekt-rules")
 include(":downloader")
 include(":evaluator")
+include(":examples:evaluator-rules")
+include(":examples:notifications")
 include(":helper-cli")
 include(":model")
 include(":notifier")
@@ -66,11 +71,13 @@ include(":reporter-web-app")
 include(":scanner")
 include(":utils:common")
 include(":utils:core")
+include(":utils:scripting")
 include(":utils:spdx")
 include(":utils:test")
 
 project(":utils:common").name = "common-utils"
 project(":utils:core").name = "core-utils"
+project(":utils:scripting").name = "scripting-utils"
 project(":utils:spdx").name = "spdx-utils"
 project(":utils:test").name = "test-utils"
 

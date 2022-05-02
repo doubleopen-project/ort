@@ -24,7 +24,6 @@ import java.io.File
 import java.io.IOException
 import java.net.URI
 
-import kotlin.io.path.createTempDirectory
 import kotlin.time.TimeSource
 
 import org.ossreviewtoolkit.downloader.vcs.GitRepo
@@ -44,7 +43,6 @@ import org.ossreviewtoolkit.utils.common.replaceCredentialsInUri
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.common.safeMkdirs
 import org.ossreviewtoolkit.utils.common.unpack
-import org.ossreviewtoolkit.utils.core.ORT_NAME
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.core.log
@@ -190,20 +188,25 @@ class Downloader(private val config: DownloaderConfiguration) {
 
         if (pkg.vcsProcessed.url.isBlank()) {
             val hint = when (pkg.id.type) {
-                "Bundler", "Gem" -> " Please define the \"source_code_uri\" in the \"metadata\" of the Gemspec, " +
-                        "see: https://guides.rubygems.org/specification-reference/#metadata"
-                "Gradle" -> " Please make sure the published POM file includes the SCM connection, see: " +
-                        "https://docs.gradle.org/current/userguide/publishing_maven.html#" +
-                        "sec:modifying_the_generated_pom"
-                "Maven" -> " Please define the \"connection\" tag within the \"scm\" tag in the POM file, " +
-                        "see: http://maven.apache.org/pom.html#SCM"
-                "NPM" -> " Please define the \"repository\" in the package.json file, see: " +
-                        "https://docs.npmjs.com/cli/v7/configuring-npm/package-json#repository"
-                "PIP", "PyPI" -> " Please make sure the setup.py defines the 'Source' attribute in " +
-                        "'project_urls', see: https://packaging.python.org/guides/" +
-                        "distributing-packages-using-setuptools/#project-urls"
-                "SBT" -> " Please make sure the published POM file includes the SCM connection, see: " +
-                        "http://maven.apache.org/pom.html#SCM"
+                "Bundler", "Gem" ->
+                    " Please define the \"source_code_uri\" in the \"metadata\" of the Gemspec, see: " +
+                            "https://guides.rubygems.org/specification-reference/#metadata"
+                "Gradle" ->
+                    " Please make sure the published POM file includes the SCM connection, see: " +
+                            "https://docs.gradle.org/current/userguide/publishing_maven.html#" +
+                            "sec:modifying_the_generated_pom"
+                "Maven" ->
+                    " Please define the \"connection\" tag within the \"scm\" tag in the POM file, see: " +
+                            "http://maven.apache.org/pom.html#SCM"
+                "NPM" ->
+                    " Please define the \"repository\" in the package.json file, see: " +
+                            "https://docs.npmjs.com/cli/v7/configuring-npm/package-json#repository"
+                "PIP", "PyPI" ->
+                    " Please make sure the setup.py defines the 'Source' attribute in 'project_urls', see: " +
+                            "https://packaging.python.org/guides/distributing-packages-using-setuptools/#project-urls"
+                "SBT" ->
+                    " Please make sure the published POM file includes the SCM connection, see: " +
+                            "http://maven.apache.org/pom.html#SCM"
                 else -> ""
             }
 
@@ -315,7 +318,7 @@ class Downloader(private val config: DownloaderConfiguration) {
         try {
             if (sourceArchive.extension == "gem") {
                 // Unpack the nested data archive for Ruby Gems.
-                val gemDirectory = createTempDirectory("$ORT_NAME-gem").toFile()
+                val gemDirectory = createOrtTempDir("gem")
                 val dataFile = gemDirectory.resolve("data.tar.gz")
 
                 try {

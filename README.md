@@ -4,33 +4,32 @@
 
 [![Slack][1]][2]
 
-[![Linux build status][4]][3] [![Windows build status][5]][3] [![Docker build status][6]][3] [![JitPack build status][10]][11]
+[![Validate Gradle Wrapper][3]][4] [![Static Analysis][5]][6]
 
-[![Linux analyzer tests][7]][3] [![Windows analyzer tests][8]][3] [![Code coverage][12]][13]
+[![Build and Test][7]][8] [![JitPack build status][9]][10] [![Code coverage][11]][12]
 
-[![TODOs][14]][15] [![Static Analysis][9]][3] [![LGTM][16]][17] [![REUSE status][18]][19] [![CII][20]][21]
+[![TODOs][13]][14] [![LGTM][15]][16] [![REUSE status][17]][18] [![CII][19]][20]
 
 [1]: https://img.shields.io/badge/Join_us_on_Slack!-ort--talk-blue.svg?longCache=true&logo=slack
 [2]: https://join.slack.com/t/ort-talk/shared_invite/enQtMzk3MDU5Njk0Njc1LThiNmJmMjc5YWUxZTU4OGI5NmY3YTFlZWM5YTliZmY5ODc0MGMyOWIwYmRiZWFmNGMzOWY2NzVhYTI0NTJkNmY
-[3]: https://github.com/oss-review-toolkit/ort/actions/workflows/static-analysis.yml
-[4]: https://dev.azure.com/oss-review-toolkit/ort/_apis/build/status/oss-review-toolkit.ort?branchName=master&jobName=LinuxTest&label=Linux%20Build
-[5]: https://dev.azure.com/oss-review-toolkit/ort/_apis/build/status/oss-review-toolkit.ort?branchName=master&jobName=WindowsTest&label=Windows%20Build
-[6]: https://dev.azure.com/oss-review-toolkit/ort/_apis/build/status/oss-review-toolkit.ort?branchName=master&jobName=DockerBuild&label=Docker%20Build
-[7]: https://dev.azure.com/oss-review-toolkit/ort/_apis/build/status/oss-review-toolkit.ort?branchName=master&jobName=LinuxAnalyzerTest&label=Linux%20Analyzer%20Tests
-[8]: https://dev.azure.com/oss-review-toolkit/ort/_apis/build/status/oss-review-toolkit.ort?branchName=master&jobName=WindowsAnalyzerTest&label=Windows%20Analyzer%20Tests
-[9]: https://github.com/oss-review-toolkit/ort/actions/workflows/static-analysis.yml/badge.svg?branch=master
-[10]: https://jitpack.io/v/oss-review-toolkit/ort.svg
-[11]: https://jitpack.io/#oss-review-toolkit/ort
-[12]: https://codecov.io/gh/oss-review-toolkit/ort/branch/master/graph/badge.svg?token=QD2tCSUTVN
-[13]: https://app.codecov.io/gh/oss-review-toolkit/ort
-[14]: https://badgen.net/https/api.tickgit.com/badgen/github.com/oss-review-toolkit/ort
-[15]: https://www.tickgit.com/browse?repo=github.com/oss-review-toolkit/ort
-[16]: https://img.shields.io/lgtm/alerts/g/oss-review-toolkit/ort.svg?logo=lgtm&logoWidth=18
-[17]: https://lgtm.com/projects/g/oss-review-toolkit/ort/alerts/
-[18]: https://api.reuse.software/badge/github.com/oss-review-toolkit/ort
-[19]: https://api.reuse.software/info/github.com/oss-review-toolkit/ort
-[20]: https://bestpractices.coreinfrastructure.org/projects/4618/badge
-[21]: https://bestpractices.coreinfrastructure.org/projects/4618
+[3]: https://github.com/oss-review-toolkit/ort/actions/workflows/gradle-wrapper-validation.yml/badge.svg
+[4]: https://github.com/oss-review-toolkit/ort/actions/workflows/gradle-wrapper-validation.yml
+[5]: https://github.com/oss-review-toolkit/ort/actions/workflows/static-analysis.yml/badge.svg
+[6]: https://github.com/oss-review-toolkit/ort/actions/workflows/static-analysis.yml
+[7]: https://github.com/oss-review-toolkit/ort/actions/workflows/build-and-test.yml/badge.svg
+[8]: https://github.com/oss-review-toolkit/ort/actions/workflows/build-and-test.yml
+[9]: https://jitpack.io/v/oss-review-toolkit/ort.svg
+[10]: https://jitpack.io/#oss-review-toolkit/ort
+[11]: https://codecov.io/gh/oss-review-toolkit/ort/branch/main/graph/badge.svg?token=QD2tCSUTVN
+[12]: https://app.codecov.io/gh/oss-review-toolkit/ort
+[13]: https://badgen.net/https/api.tickgit.com/badgen/github.com/oss-review-toolkit/ort
+[14]: https://www.tickgit.com/browse?repo=github.com/oss-review-toolkit/ort
+[15]: https://img.shields.io/lgtm/alerts/g/oss-review-toolkit/ort.svg?logo=lgtm&logoWidth=18
+[16]: https://lgtm.com/projects/g/oss-review-toolkit/ort/alerts/
+[17]: https://api.reuse.software/badge/github.com/oss-review-toolkit/ort
+[18]: https://api.reuse.software/info/github.com/oss-review-toolkit/ort
+[19]: https://bestpractices.coreinfrastructure.org/projects/4618/badge
+[20]: https://bestpractices.coreinfrastructure.org/projects/4618
 
 # Introduction
 
@@ -53,6 +52,8 @@ use):
   classifications.
 * [_Reporter_](#reporter) - presents results in various formats such as visual reports, Open Source notices or
   Bill-Of-Materials (BOMs) to easily identify dependencies, licenses, copyrights or policy rule violations.
+* [_Notifier_](./notifier) - sends result notifications via different channels (like
+  [emails](./examples/notifications/src/main/resources/example.notifications.kts) and / or JIRA tickets).
 
 # Installation
 
@@ -77,9 +78,10 @@ by running `git submodule update --init --recursive`.
 Install the following basic prerequisites:
 
 * Docker 18.09 or later (and ensure its daemon is running).
-* Enable [BuildKit](https://docs.docker.com/develop/develop-images/build_enhancements/) for Docker.
+* Enable [BuildKit](https://docs.docker.com/develop/develop-images/build_enhancements/#to-enable-buildkit-builds) for Docker.
 
-Change into the directory with ORT's source code and run `docker build -t ort .`.
+Change into the directory with ORT's source code and run `docker build -t ort .`. Alternatively, use the script at
+`scripts/docker_build.sh` which also sets the ORT version from the Git revision.
 
 ### Build natively
 
@@ -152,10 +154,6 @@ for documentation of the required Jenkins plugins. The job accepts various param
 line arguments. Additionally, one can trigger a downstream job which e.g. further processes scan results. Note that it
 is the downstream job's responsibility to copy any artifacts it needs from the upstream job.
 
-A demo instance of a Jenkins pipeline for ORT will soon be
-
-![Fosshost Logo](./logos/fosshost.png)
-
 ## Getting started
 
 Please see [Getting Started](./docs/getting-started.md) for an introduction to the individual tools.
@@ -189,9 +187,9 @@ The main configuration file for the operation of ORT. This configuration is main
 the ORT instance. In contrast to the configuration files in the following, this file rarely changes once ORT is
 operational.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| HOCON | Global | `$ORT_CONFIG_DIR/ort.conf` | Empty |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| HOCON | Global | `$ORT_CONFIG_DIR/ort.conf` |
 
 The [reference configuration file](./model/src/main/resources/reference.conf) gives a good impression about the content
 of the main ORT configuration file. It consists of sections related to different sub components of ORT. The meaning
@@ -202,13 +200,13 @@ customize the configuration to a specific environment. The following options are
 
 * Properties can be defined via environment variables by using the full property path as the variable name.
   For instance, one can override the Postgres schema by setting 
-  `ort.scanner.storages.postgresStorage.schema=test_schema`. The variable's name is case sensitive.
+  `ort.scanner.storages.postgres.schema=test_schema`. The variable's name is case sensitive.
   Some programs like Bash do not support dots in variable names. For this case, the dots can be
   replaced by double underscores, i.e., the above example is turned into 
-  `ort__scanner__storages__postgresStorage__schema=test_schema`.
+  `ort__scanner__storages__postgres__schema=test_schema`.
 * In addition to that, one can override the values of properties on the command line using the `-P` option. The option expects a
   key-value pair. Again, the key must define the full path to the property to be overridden, e.g.
-  `-P ort.scanner.storages.postgresStorage.schema=test_schema`. The `-P` option can be repeated on the command
+  `-P ort.scanner.storages.postgres.schema=test_schema`. The `-P` option can be repeated on the command
   line to override multiple properties.
 * Properties in the configuration file can reference environment variables using the syntax `${VAR}`.
   This is especially useful to reference dynamic or sensitive data. As an example, the credentials for the
@@ -228,59 +226,59 @@ customize the configuration to a specific environment. The following options are
 A list of copyright statements that are considered garbage, for example statements that were incorrectly classified as
 copyrights by the scanner.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Global | `$ORT_CONFIG_DIR/copyright-garbage.yml` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Global | `$ORT_CONFIG_DIR/copyright-garbage.yml` |
 
 #### [Curations file](./docs/config-file-curations-yml.md)
 
 A file to correct invalid or missing package metadata, and to set the concluded license for packages.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Global | `$ORT_CONFIG_DIR/curations.yml` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Global | `$ORT_CONFIG_DIR/curations.yml` |
 
 #### [Custom license texts dir](./docs/dir-custom-license-texts.md)
 
 A directory that contains license texts which are not provided by ORT.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| Text | Global | `$ORT_CONFIG_DIR/custom-license-texts/` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| Text | Global | `$ORT_CONFIG_DIR/custom-license-texts/` |
 
 #### [How to fix text provider script](./docs/how-to-fix-text-provider-kts.md)
 
 A Kotlin script that enables the injection of how-to-fix texts in markdown format for ORT issues into the reports.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| Kotlin script | Global | `$ORT_CONFIG_DIR/how-to-fix-text-provider.kts` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| Kotlin script | Global | `$ORT_CONFIG_DIR/how-to-fix-text-provider.kts` |
 
 #### [License classifications file](docs/config-file-license-classifications-yml.md)
 
 A file that contains user-defined categorization of licenses.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Global | `$ORT_CONFIG_DIR/license-classifications.yml` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Global | `$ORT_CONFIG_DIR/license-classifications.yml` |
 
 #### [Resolution file](./docs/config-file-resolutions-yml.md)
 
 Configurations to resolve any issues or rule violations by providing a mandatory reason, and an optional comment to
 justify the resolution on a global scale.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Global | `$ORT_CONFIG_DIR/resolutions.yml` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Global | `$ORT_CONFIG_DIR/resolutions.yml` |
 
 #### [Repository configuration file](./docs/config-file-ort-yml.md)
 
 A configuration file, usually stored in the project's repository, for license finding curations, exclusions, and issues
 or rule violations resolutions in the context of the repository.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Repository (project) | `[analyzer-input-dir]/.ort.yml` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Repository (project) | `[analyzer-input-dir]/.ort.yml` |
 
 #### [Package configuration file / directory](./docs/config-file-package-configuration-yml.md)
 
@@ -289,17 +287,17 @@ license finding curations for dependency packages to address issues found within
 [`package-config create` command](./helper-cli/src/main/kotlin/commands/packageconfig/CreateCommand.kt)
 can be used to populate a directory with template package configuration files.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| YAML / JSON | Package (dependency) | `$ORT_CONFIG_DIR/package-configurations/` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- | ---------------- |
+| YAML / JSON | Package (dependency) | `$ORT_CONFIG_DIR/package-configurations/` |
 
 #### [Policy rules file](./docs/file-rules-kts.md)
 
 The file containing any policy rule implementations to be used with the _evaluator_.
 
-| Format | Scope | Default location | Default value |
-| ------ | ----- | ---------------- | ------------- |
-| Kotlin script (DSL) | Evaluator | `$ORT_CONFIG_DIR/rules.kts` | Empty (n/a) |
+| Format | Scope | Default location |
+| ------ | ----- |------------------|
+| Kotlin script (DSL) | Evaluator | `$ORT_CONFIG_DIR/evaluator.rules.kts` |
 
 # Details on the tools
 
@@ -311,7 +309,7 @@ The _analyzer_ is a Software Composition Analysis (SCA) tool that determines the
 inside the specified input directory (`-i`). It does so by querying the detected package managers; **no modifications**
 to your existing project source code, like applying build system plugins, are necessary for that to work. The tree of
 transitive dependencies per project is written out as part of an
-[OrtResult](https://github.com/oss-review-toolkit/ort/blob/master/model/src/main/kotlin/OrtResult.kt) in YAML (or
+[OrtResult](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/OrtResult.kt) in YAML (or
 JSON, see `-f`) format to a file named `analyzer-result.yml` in the specified output directory (`-o`). The output file
 exactly documents the status quo of all package-related metadata. It can be further processed or manually edited before
 passing it to one of the other tools.
@@ -320,8 +318,7 @@ Currently, the following package managers (grouped by the programming language t
 supported:
 
 * C / C++
-  * [Conan](https://conan.io/) (limitations:
-  [receipe vs. source repository](https://github.com/oss-review-toolkit/ort/issues/2037))
+  * [Conan](https://conan.io/)
   * Also see: [SPDX documents](#analyzer-for-spdx-documents)
 * Dart / Flutter
   * [Pub](https://pub.dev/)
@@ -342,7 +339,7 @@ supported:
   * [NPM](https://www.npmjs.com/) (limitations:
   [no scope-specific registries](https://github.com/oss-review-toolkit/ort/issues/3741),
   [no peer dependencies](https://github.com/oss-review-toolkit/ort/issues/95))
-  * [Yarn](https://yarnpkg.com/) (limitations:
+  * [Yarn](https://classic.yarnpkg.com/) (limitations:
   [no Yarn 2 / 3 support](https://github.com/oss-review-toolkit/ort/issues/2283))
 * .NET
   * [DotNet](https://docs.microsoft.com/en-us/dotnet/core/tools/) (limitations:
@@ -360,9 +357,9 @@ supported:
   * [Composer](https://getcomposer.org/)
 * Python
   * [PIP](https://pip.pypa.io/) (limitations:
-  [Python 2.7 or 3.6 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
-  * [Pipenv](https://pipenv.readthedocs.io/) (limitations:
-  [Python 2.7 or 3.6 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
+  [Python 2.7 or 3.8 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
+  * [Pipenv](https://pipenv.pypa.io/en/latest/) (limitations:
+  [Python 2.7 or 3.8 and PIP 18.1 only](https://github.com/oss-review-toolkit/ort/issues/3671))
 * Ruby
   * [Bundler](https://bundler.io/) (limitations:
   [restricted to the version available on the host](https://github.com/oss-review-toolkit/ort/issues/1308))
@@ -370,13 +367,16 @@ supported:
   * [Cargo](https://doc.rust-lang.org/cargo/)
 * Scala
   * [SBT](https://www.scala-sbt.org/)
+* Unmanged
+  * This is a special "package manager" that mananges all files that cannot be associated to any of the other package
+  managers.
 
 <a name="analyzer-for-spdx-documents"></a>
 
 If another package manager that is not part of the list above is used (or no package manager at all), the generic
 fallback to [SPDX documents](https://spdx.dev/specifications/) can be leveraged to describe
-[projects](./analyzer/src/funTest/assets/projects/synthetic/spdx/project/project.spdx.yml) or
-[packages](./analyzer/src/funTest/assets/projects/synthetic/spdx/package/libs/curl/package.spdx.yml).
+[projects](./analyzer/src/funTest/assets/projects/synthetic/spdx/project-xyz-with-inline-packages.spdx.yml) or
+[packages](./analyzer/src/funTest/assets/projects/synthetic/spdx/libs/curl/package.spdx.yml).
 
 <a name="downloader">&nbsp;</a>
 
@@ -414,6 +414,7 @@ Additionally, the following reference implementations exist (in alphabetical ord
 * [Askalono](https://github.com/amzn/askalono)
 * [lc](https://github.com/boyter/lc)
 * [Licensee](https://github.com/benbalter/licensee)
+* [SCANOSS](https://www.scanoss.com/)
 
 For a comparison of some of these, see this
 [Bachelor Thesis](https://osr.cs.fau.de/2019/08/07/final-thesis-a-comparison-study-of-open-source-license-crawler/).
@@ -645,8 +646,9 @@ To enable this provider, pass `-a VulnerableCode` on the command line.
 [![Evaluator](./logos/evaluator.png)](./evaluator/src/main/kotlin)
 
 The _evaluator_ is used to perform custom license policy checks on scan results. The rules to check against are
-implemented as scripts (currently Kotlin scripts, with a dedicated DSL, but support for other scripting can be added as
-well. See [rules.kts](./examples/rules.kts) for an example file.
+implemented as Kotlin scripts with a dedicated DSL. See
+[example.rules.kts](./examples/evaluator-rules/src/main/resources/example.rules.kts) for an example rules script. The
+script is wrapped into a minimal [evaluator-rules](./examples/evaluator-rules) project which enables auto-completion.
 
 <a name="reporter">&nbsp;</a>
 
@@ -666,7 +668,8 @@ following formats are supported (reporter names are case-insensitive):
     * Man page (`-f ManPageTemplate`)
     * AsciiDoc (`-f AdocTemplate`): Does not convert the created AsciiDoc files but writes the generated files as
       reports.
-* [ctrlX AUTOMATION](https://ctrlx-automation.com/) [FOSS information](https://github.com/boschrexroth/json-schema/tree/master/ctrlx-automation/ctrlx-core/apps/fossinfo)
+* [ctrlX AUTOMATION](https://apps.boschrexroth.com/microsites/ctrlx-automation/) platform
+  [FOSS information](https://github.com/boschrexroth/json-schema/tree/master/ctrlx-automation/ctrlx-core/apps/fossinfo) (`-f CtrlXAutomation`)
 * [CycloneDX](https://cyclonedx.org/) BOM (`-f CycloneDx`)
 * [Excel](https://products.office.com/excel) sheet (`-f Excel`)
 * [GitLabLicenseModel](https://docs.gitlab.com/ee/ci/pipelines/job_artifacts.html#artifactsreportslicense_scanning-ultimate) (`-f GitLabLicenseModel`)
@@ -740,9 +743,9 @@ needs to be installed. Afterwards tests can be run via the green "Play" icon fro
 
 # License
 
-Copyright (C) 2017-2021 HERE Europe B.V.\
+Copyright (C) 2017-2022 HERE Europe B.V.\
 Copyright (C) 2019-2020 Bosch Software Innovations GmbH\
-Copyright (C) 2020-2021 Bosch.IO GmbH
+Copyright (C) 2020-2022 Bosch.IO GmbH
 
 See the [LICENSE](./LICENSE) file in the root of this project for license details.
 

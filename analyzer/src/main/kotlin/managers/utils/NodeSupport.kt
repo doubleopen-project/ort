@@ -31,9 +31,6 @@ import java.nio.file.PathMatcher
 import org.ossreviewtoolkit.model.readJsonFile
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
 import org.ossreviewtoolkit.utils.common.toUri
-import org.ossreviewtoolkit.utils.core.AuthenticatedProxy
-import org.ossreviewtoolkit.utils.core.ProtocolProxyMap
-import org.ossreviewtoolkit.utils.core.determineProxyFromURL
 import org.ossreviewtoolkit.utils.core.log
 import org.ossreviewtoolkit.utils.core.showStackTrace
 
@@ -112,46 +109,6 @@ fun expandNpmShortcutUrl(url: String): String {
     }
 }
 
-/**
- * Return all proxies defined in the provided [NPM configuration][npmRc].
- */
-fun readProxySettingsFromNpmRc(npmRc: String): ProtocolProxyMap {
-    val map = mutableMapOf<String, MutableList<AuthenticatedProxy>>()
-
-    npmRc.lines().forEach { line ->
-        val keyAndValue = line.split('=', limit = 2).map { it.trim() }
-        if (keyAndValue.size != 2) return@forEach
-
-        val (key, value) = keyAndValue
-        when (key) {
-            "proxy" -> determineProxyFromURL(value)?.let {
-                map.getOrPut("http") { mutableListOf() } += it
-            }
-
-            "https-proxy" -> determineProxyFromURL(value)?.let {
-                map.getOrPut("https") { mutableListOf() } += it
-            }
-        }
-    }
-
-    return map
-}
-
-/**
- * Return the npm registry defined in the provided [NPM configuration][npmRc] or null.
- */
-fun readRegistryFromNpmRc(npmRc: String): String? {
-    npmRc.lines().forEach { line ->
-        val keyAndValue = line.split('=', limit = 2).map { it.trim() }
-        if (keyAndValue.size != 2) return@forEach
-
-        val (key, value) = keyAndValue
-        if (key == "registry") return value
-    }
-
-    return null
-}
-
 private val NPM_LOCK_FILES = listOf("npm-shrinkwrap.json", "package-lock.json")
 private val YARN_LOCK_FILES = listOf("yarn.lock")
 
@@ -175,7 +132,7 @@ private fun getPackageJsonInfo(definitionFiles: Set<File>): Collection<PackageJs
             isYarnWorkspaceRoot = isYarnWorkspaceRoot(definitionFile),
             hasYarnLockfile = hasYarnLockFile(definitionFile.parentFile),
             hasNpmLockfile = hasNpmLockFile(definitionFile.parentFile),
-            isYarnWorkspaceSubmodule = yarnWorkspaceSubmodules.contains(definitionFile)
+            isYarnWorkspaceSubmodule = definitionFile in yarnWorkspaceSubmodules
         )
     }
 }

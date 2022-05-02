@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,6 +81,7 @@ import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
+import org.ossreviewtoolkit.model.utils.parseRepoManifestPath
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.utils.common.DiskCache
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
@@ -139,9 +141,7 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
 
         fun parseLicenses(mavenProject: MavenProject) =
             mavenProject.licenses.mapNotNull { license ->
-                license.comments.withoutPrefix("SPDX-License-Identifier:") {
-                    license.name ?: license.url ?: license.comments
-                }?.trim()
+                license.name ?: license.url ?: license.comments
             }.toSortedSet()
 
         fun processDeclaredLicenses(licenses: Set<String>): ProcessedDeclaredLicense =
@@ -201,14 +201,20 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
                         }
 
                         // Maven does not officially support git-repo as an SCM, see
-                        // http://maven.apache.org/scm/scms-overview.html, so come up with a convention to use the URL
-                        // fragment for the path to the manifest inside the repository.
+                        // http://maven.apache.org/scm/scms-overview.html, so come up with the convention to use the
+                        // "manifest" query parameter for the path to the manifest inside the repository. An earlier
+                        // version of this workaround expected the query string to be only the path to the manifest, for
+                        // backward compatibility convert such URLs to the new syntax.
                         type == "git-repo" -> {
+                            val manifestPath = url.parseRepoManifestPath()
+                                ?: url.substringAfter('?').takeIf { it.isNotBlank() && it.endsWith(".xml") }
+                            val urlWithManifest = url.takeIf { manifestPath == null }
+                                ?: "${url.substringBefore('?')}?manifest=$manifestPath"
+
                             VcsInfo(
                                 type = VcsType.GIT_REPO,
-                                url = url.substringBefore('?'),
-                                revision = tag,
-                                path = url.substringAfter('?')
+                                url = urlWithManifest,
+                                revision = tag
                             )
                         }
 
@@ -223,12 +229,23 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
 
                             // Try to detect the Maven SCM provider from the URL only, e.g. by looking at the host or
                             // special URL paths.
-                            VcsHost.toVcsInfo(fixedUrl).copy(revision = tag).also {
+                            VcsHost.parseUrl(fixedUrl).copy(revision = tag).also {
                                 log.info { "Fixed up invalid SCM connection '$connection' without a provider to $it." }
                             }
                         }
 
-                        else -> VcsInfo(type = VcsType(type), url = url, revision = tag)
+                        else -> {
+                            VcsHost.fromUrl(url)?.let { host ->
+                                host.toVcsInfo(url)?.let { vcsInfo ->
+                                    // Fixup paths that are specified as part of the URL and contain the project name as
+                                    // a prefix.
+                                    val projectPrefix = "${host.getProject(url)}-"
+                                    vcsInfo.path.withoutPrefix(projectPrefix)?.let { path ->
+                                        vcsInfo.copy(path = path)
+                                    }
+                                }
+                            } ?: VcsInfo(type = VcsType(type), url = url, revision = tag)
+                        }
                     }
                 } else {
                     val userHostMatcher = USER_HOST_REGEX.matcher(connection)
@@ -469,6 +486,9 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
         val remoteRepositories = allRepositories.filterNot {
             // Some (Linux) file URIs do not start with "file://" but look like "file:/opt/android-sdk-linux".
             it.url.startsWith("file:/")
+        }.map { repository ->
+            val proxy = repositorySystemSession.proxySelector.getProxy(repository)
+            RemoteRepository.Builder(repository).setProxy(proxy).build()
         }
 
         if (log.delegate.isDebugEnabled) {
@@ -518,9 +538,9 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
 
             try {
                 wrapMavenSession {
-                    val repositoryConnector = repositoryConnectorProvider
-                        .newRepositoryConnector(repositorySystemSession, repository)
-                    repositoryConnector.get(listOf(artifactDownload), null)
+                    repositoryConnectorProvider.newRepositoryConnector(repositorySystemSession, repository).use {
+                        it.get(listOf(artifactDownload), null)
+                    }
                 }
             } catch (e: NoRepositoryConnectorException) {
                 e.showStackTrace()
@@ -541,16 +561,15 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
 
                 val transporter = transporterProvider.newTransporter(repositorySystemSession, repository)
 
-                @Suppress("TooGenericExceptionCaught")
-                val actualChecksum = try {
+                val actualChecksum = runCatching {
                     val task = GetTask(checksum.location)
                     transporter.get(task)
 
                     trimChecksumData(task.dataString)
-                } catch (e: Exception) {
-                    e.showStackTrace()
+                }.getOrElse {
+                    it.showStackTrace()
 
-                    log.warn { "Could not get checksum for '$artifact': ${e.collectMessagesAsString()}" }
+                    log.warn { "Could not get checksum for '$artifact': ${it.collectMessagesAsString()}" }
 
                     // Fall back to an empty checksum string.
                     ""
@@ -675,6 +694,12 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             PackageManager.processProjectVcs(it, vcsFromPackage, *vcsFallbackUrls)
         } ?: PackageManager.processPackageVcs(vcsFromPackage, *vcsFallbackUrls)
 
+        val isSpringStarterProject = with(mavenProject) {
+            listOf("boot", "cloud").any {
+                groupId == "org.springframework.$it" && artifactId.startsWith("spring-$it-starter-")
+            }
+        }
+
         return Package(
             id = Identifier(
                 type = "Maven",
@@ -691,7 +716,7 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             sourceArtifact = sourceRemoteArtifact,
             vcs = vcsFromPackage,
             vcsProcessed = vcsProcessed,
-            isMetaDataOnly = mavenProject.packaging == "pom",
+            isMetaDataOnly = mavenProject.packaging == "pom" || isSpringStarterProject,
             isModified = isBinaryArtifactModified || isSourceArtifactModified
         )
     }

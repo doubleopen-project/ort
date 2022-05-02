@@ -22,7 +22,6 @@ package org.ossreviewtoolkit.clients.github
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.anyUrl
-import com.github.tomakehurst.wiremock.client.WireMock.configureFor
 import com.github.tomakehurst.wiremock.client.WireMock.containing
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.matching
@@ -50,36 +49,34 @@ import java.net.URI
 import java.util.regex.Pattern
 
 import org.ossreviewtoolkit.clients.github.issuesquery.Issue
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class GitHubServiceTest : WordSpec({
-    val wiremock = WireMockServer(
+    val server = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
             .usingFilesUnderDirectory(TEST_FILES_ROOT)
     )
 
     beforeSpec {
-        wiremock.start()
-        configureFor(wiremock.port())
+        server.start()
     }
 
     afterSpec {
-        wiremock.stop()
+        server.stop()
     }
 
-    beforeTest {
-        wiremock.resetAll()
+    beforeEach {
+        server.resetAll()
     }
 
     "error handling" should {
         "detect a failure response from the server" {
-            wiremock.stubFor(
+            server.stubFor(
                 post(anyUrl())
                     .willReturn(aResponse().withStatus(403))
             )
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val issuesResult = service.repositoryIssues(REPO_OWNER, REPO_NAME)
 
@@ -99,7 +96,7 @@ class GitHubServiceTest : WordSpec({
         }
 
         "detect errors in the GraphQL result" {
-            wiremock.stubFor(
+            server.stubFor(
                 post(anyUrl())
                     .willReturn(
                         aResponse().withStatus(200)
@@ -107,7 +104,7 @@ class GitHubServiceTest : WordSpec({
                     )
             )
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val issuesResult = service.repositoryIssues(REPO_OWNER, REPO_NAME)
 
@@ -125,13 +122,13 @@ class GitHubServiceTest : WordSpec({
 
     "repositoryIssues" should {
         "return the issues of a repository" {
-            wiremock.stubQuery("issues", repoVariablesRegex(Paging.MAX_PAGE_SIZE), "issues_response.json")
+            server.stubQuery("issues", repoVariablesRegex(Paging.MAX_PAGE_SIZE), "issues_response.json")
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val issuesResult = service.repositoryIssues(REPO_OWNER, REPO_NAME)
 
-            issuesResult.check { pagedResult ->
+            issuesResult.shouldBeSuccess { pagedResult ->
                 val titles = pagedResult.items.map(Issue::title)
 
                 titles should containExactly(
@@ -158,13 +155,13 @@ class GitHubServiceTest : WordSpec({
 
         "support paging" {
             val paging = Paging(pageSize = PAGE_SIZE, cursor = "some-cursor")
-            wiremock.stubQuery("issues", repoVariablesRegex(cursor = paging.cursor), "issues_response_paged.json")
+            server.stubQuery("issues", repoVariablesRegex(cursor = paging.cursor), "issues_response_paged.json")
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val issuesResult = service.repositoryIssues(REPO_OWNER, REPO_NAME, paging)
 
-            issuesResult.check { pagedResult ->
+            issuesResult.shouldBeSuccess { pagedResult ->
                 val titles = pagedResult.items.map(Issue::title)
 
                 titles should containExactly(
@@ -181,13 +178,13 @@ class GitHubServiceTest : WordSpec({
 
     "repositoryReleases" should {
         "return the releases of a repository" {
-            wiremock.stubQuery("releases", repoVariablesRegex(Paging.MAX_PAGE_SIZE), "releases_response.json")
+            server.stubQuery("releases", repoVariablesRegex(Paging.MAX_PAGE_SIZE), "releases_response.json")
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val releasesResult = service.repositoryReleases(REPO_OWNER, REPO_NAME)
 
-            releasesResult.check { pagedResult ->
+            releasesResult.shouldBeSuccess { pagedResult ->
                 val names = pagedResult.items.mapNotNull { it.name }
 
                 names should containExactly(
@@ -212,13 +209,13 @@ class GitHubServiceTest : WordSpec({
 
         "support paging" {
             val paging = Paging(pageSize = PAGE_SIZE, cursor = "some-cursor")
-            wiremock.stubQuery("releases", repoVariablesRegex(cursor = paging.cursor), "releases_response_paged.json")
+            server.stubQuery("releases", repoVariablesRegex(cursor = paging.cursor), "releases_response_paged.json")
 
-            val service = createService(wiremock)
+            val service = createService(server)
 
             val releasesResult = service.repositoryReleases(REPO_OWNER, REPO_NAME, paging)
 
-            releasesResult.check { pagedResult ->
+            releasesResult.shouldBeSuccess { pagedResult ->
                 pagedResult.items shouldHaveSize 2
                 pagedResult.pageSize shouldBe PAGE_SIZE
                 pagedResult.cursor shouldBe "Y3Vyc29yOnYyOpK5MjAyMC0wNi0yM1QxMzoyNzo1NiswMjowMM4BqJGR"
@@ -294,12 +291,14 @@ private fun variablesRegex(variables: List<Pair<String, Any>>): String {
  * variable can be provided.
  */
 private fun repoVariablesRegex(pageSize: Int = PAGE_SIZE, cursor: String? = null): String =
-    variablesRegex(listOfNotNull(
-        "repo_owner" to REPO_OWNER,
-        "repo_name" to REPO_NAME,
-        "page_size" to pageSize,
-        cursor?.let { "cursor" to it }
-    ))
+    variablesRegex(
+        listOfNotNull(
+            "repo_owner" to REPO_OWNER,
+            "repo_name" to REPO_NAME,
+            "page_size" to pageSize,
+            cursor?.let { "cursor" to it }
+        )
+    )
 
 /**
  * Read an expected GraphQL query from a file with the given [name] and convert it to a form, so that it can be
@@ -309,13 +308,4 @@ private fun repoVariablesRegex(pageSize: Int = PAGE_SIZE, cursor: String? = null
 private fun readExpectedQuery(name: String): String {
     val lines = File("src/main/assets/$name.graphql").readLines()
     return lines.joinToString("\\n")
-}
-
-/**
- * Check whether this [Result] is successful and contains a non-null value. If so, invoke [block] on the value.
- */
-private fun <T> Result<T>.check(block: (T) -> Unit) {
-    shouldBeSuccess { value ->
-        value.shouldNotBeNull { block(this) }
-    }
 }

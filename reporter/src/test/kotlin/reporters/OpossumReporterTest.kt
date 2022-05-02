@@ -21,6 +21,7 @@
 package org.ossreviewtoolkit.reporter.reporters
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
@@ -66,6 +67,7 @@ import org.ossreviewtoolkit.model.config.ScopeExclude
 import org.ossreviewtoolkit.model.config.ScopeExcludeReason
 import org.ossreviewtoolkit.utils.core.Environment
 import org.ossreviewtoolkit.utils.spdx.toSpdx
+import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class OpossumReporterTest : WordSpec({
     "resolvePath()" should {
@@ -110,12 +112,13 @@ class OpossumReporterTest : WordSpec({
         val opossumInput = OpossumReporter().generateOpossumInput(result, emptySet())
 
         "create input that is somehow valid" {
-            opossumInput shouldNot beNull()
-            opossumInput.resources shouldNot beNull()
-            opossumInput.signals shouldNot beNull()
-            opossumInput.pathToSignal shouldNot beNull()
-            opossumInput.packageToRoot shouldNot beNull()
-            opossumInput.attributionBreakpoints shouldNot beNull()
+            opossumInput shouldNotBeNull {
+                resources shouldNot beNull()
+                signals shouldNot beNull()
+                pathToSignal shouldNot beNull()
+                packageToRoot shouldNot beNull()
+                attributionBreakpoints shouldNot beNull()
+            }
         }
 
         val fileList = opossumInput.resources.toFileList()
@@ -133,17 +136,22 @@ class OpossumReporterTest : WordSpec({
         }
 
         "create a file list that contains files from other lists" {
-            opossumInput.pathToSignal.forEach { e -> fileList shouldContain resolvePath(e.key) }
-            opossumInput.attributionBreakpoints
-                .map { it.replace(Regex("/$"), "") }
-                .forEach { fileList shouldContain resolvePath(it) }
-            opossumInput.packageToRoot.forEach { it.value.forEach { fileList shouldContain resolvePath(it.key) } }
+            opossumInput.pathToSignal.keys.forAll { path -> fileList shouldContain resolvePath(path) }
+
+            opossumInput.attributionBreakpoints.map { it.replace(Regex("/$"), "") }.forAll { path ->
+                fileList shouldContain resolvePath(path)
+            }
+
+            opossumInput.packageToRoot.values.forAll { levelForPath ->
+                levelForPath.keys.forAll { path ->
+                    fileList shouldContain resolvePath(path)
+                }
+            }
         }
 
         "create a result that contains all packages in its signals" {
-            result.analyzer!!.result.packages.forEach { pkg ->
-                val id = pkg.pkg.id
-                opossumInput.signals.find { it.id == id } shouldNot beNull()
+            result.analyzer!!.result.packages.forAll { pkg ->
+                opossumInput.signals.find { it.id == pkg.pkg.id } shouldNot beNull()
             }
         }
 
@@ -152,26 +160,24 @@ class OpossumReporterTest : WordSpec({
                 "/pom.xml/compile/first-package-group/first-package@0.0.1/LICENSE"
             )
             signals.size shouldBe 2
-            val signal = signals
-                .find { it.source == "ORT-Scanner-SCANNER@1.2.3" }
-            signal shouldNot beNull()
-            signal!!.license.toString() shouldBe "Apache-2.0"
+            signals.find { it.source == "ORT-Scanner-SCANNER@1.2.3" } shouldNotBeNull {
+                license.toString() shouldBe "Apache-2.0"
+            }
         }
 
         "create a signal with copyright if some file is added by SCANNER report" {
             val signals =
                 opossumInput.getSignalsForFile("/pom.xml/compile/first-package-group/first-package@0.0.1/some/file")
             signals.size shouldBe 2
-            val signal = signals
-                .find { it.source == "ORT-Scanner-SCANNER@1.2.3" }
-            signal shouldNot beNull()
-            signal!!.copyright shouldContain "Copyright 2020 Some copyright holder in source artifact"
-            signal.copyright shouldContain "Copyright 2020 Some other copyright holder in source artifact"
+            signals.find { it.source == "ORT-Scanner-SCANNER@1.2.3" } shouldNotBeNull {
+                copyright shouldContain "Copyright 2020 Some copyright holder in source artifact"
+                copyright shouldContain "Copyright 2020 Some other copyright holder in source artifact"
+            }
         }
 
         "create signals with all uuids being assigned" {
-            opossumInput.pathToSignal.forEach { e ->
-                e.value.forEach { uuid ->
+            opossumInput.pathToSignal.values.forAll { signal ->
+                signal.forAll { uuid ->
                     opossumInput.signals.find { it.uuid == uuid } shouldNot beNull()
                 }
             }
@@ -213,14 +219,14 @@ class OpossumReporterTest : WordSpec({
                 opossumInput.getSignalsForFile("/pom.xml/compile/first-package-group/first-package@0.0.1")
                     .filter { it.comment?.contains(Regex("Source-.*Message-")) == true }
             issuesFromFirstPackage.size shouldBe 4
-            issuesFromFirstPackage.forEach {
+            issuesFromFirstPackage.forAll {
                 it.followUp shouldBe true
                 it.excludeFromNotice shouldBe true
             }
 
             val issuesAttachedToFallbackPath = opossumInput.getSignalsForFile("/")
             issuesAttachedToFallbackPath.size shouldBe 1
-            issuesAttachedToFallbackPath.forEach {
+            issuesAttachedToFallbackPath.forAll {
                 it.followUp shouldBe true
                 it.excludeFromNotice shouldBe true
                 it.comment shouldContain Regex("Source-.*Message-")
@@ -269,7 +275,7 @@ private fun createOrtResult(): OrtResult {
         ),
         analyzer = AnalyzerRun(
             environment = Environment(),
-            config = AnalyzerConfiguration(ignoreToolVersions = true, allowDynamicVersions = true),
+            config = AnalyzerConfiguration(allowDynamicVersions = true),
             result = AnalyzerResult(
                 projects = sortedSetOf(
                     Project(
@@ -449,7 +455,8 @@ private fun createOrtResult(): OrtResult {
                         OrtIssue(
                             source = "Source-1",
                             message = "Message-1"
-                        ), OrtIssue(
+                        ),
+                        OrtIssue(
                             source = "Source-2",
                             message = "Message-2"
                         )
@@ -538,7 +545,8 @@ private fun createOrtResult(): OrtResult {
                                     OrtIssue(
                                         source = "Source-4",
                                         message = "Message-4"
-                                    ), OrtIssue(
+                                    ),
+                                    OrtIssue(
                                         source = "Source-5",
                                         message = "Message-5"
                                     )

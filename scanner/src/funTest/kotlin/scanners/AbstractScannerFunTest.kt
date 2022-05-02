@@ -22,19 +22,17 @@ package org.ossreviewtoolkit.scanner.scanners
 import io.kotest.core.Tag
 import io.kotest.core.spec.Spec
 import io.kotest.core.spec.style.StringSpec
-import io.kotest.core.test.TestCase
 import io.kotest.inspectors.forAll
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.file.shouldNotStartWithPath
-import io.kotest.matchers.shouldBe
 
 import java.io.File
 
+import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
-import org.ossreviewtoolkit.scanner.LocalScanner
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.scanner.PathScanner
 import org.ossreviewtoolkit.utils.test.createSpecTempDir
-import org.ossreviewtoolkit.utils.test.createTestTempDir
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringSpec() {
@@ -46,33 +44,29 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
     private val commonlyDetectedFiles = listOf("LICENSE", "LICENCE", "COPYING")
 
     private lateinit var inputDir: File
-    private lateinit var outputDir: File
 
-    abstract val scanner: LocalScanner
-    abstract val expectedFileLicenses: Set<SpdxExpression>
-    abstract val expectedDirectoryLicenses: Set<SpdxExpression>
+    abstract val scanner: PathScanner
+    abstract val expectedFileLicenses: List<LicenseFinding>
+    abstract val expectedDirectoryLicenses: List<LicenseFinding>
 
-    override fun beforeSpec(spec: Spec) {
-        super.beforeSpec(spec)
+    override suspend fun beforeSpec(spec: Spec) {
         inputDir = createSpecTempDir()
 
         // Copy our own root license under different names to a temporary directory so we have something to operate on.
         val ortLicense = File("../LICENSE")
-        commonlyDetectedFiles.forEach { ortLicense.copyTo(inputDir.resolve(it), overwrite = true) }
-    }
-
-    override fun beforeTest(testCase: TestCase) {
-        super.beforeTest(testCase)
-        outputDir = createTestTempDir()
+        commonlyDetectedFiles.forEach {
+            val text = ortLicense.readText()
+            inputDir.resolve(it).writeText(text.replace("license", it))
+        }
     }
 
     init {
         "Scanning a single file succeeds".config(tags = testTags) {
-            val result = scanner.scanPath(inputDir.resolve("LICENSE"), outputDir)
+            val result = scanner.scanPath(inputDir.resolve("LICENSE"))
             val summary = result.scanner?.results?.scanResults?.singleOrNull()?.singleOrNull()?.summary
 
             summary shouldNotBeNull {
-                licenses shouldBe expectedFileLicenses
+                licenseFindings shouldContainExactlyInAnyOrder expectedFileLicenses
                 licenseFindings.forAll {
                     File(it.location.path) shouldNotStartWithPath inputDir
                 }
@@ -80,11 +74,11 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
         }
 
         "Scanning a directory succeeds".config(tags = testTags) {
-            val result = scanner.scanPath(inputDir, outputDir)
+            val result = scanner.scanPath(inputDir)
             val summary = result.scanner?.results?.scanResults?.singleOrNull()?.singleOrNull()?.summary
 
             summary shouldNotBeNull {
-                licenses shouldBe expectedDirectoryLicenses
+                licenseFindings shouldContainExactlyInAnyOrder expectedDirectoryLicenses
                 licenseFindings.forAll {
                     File(it.location.path) shouldNotStartWithPath inputDir
                 }

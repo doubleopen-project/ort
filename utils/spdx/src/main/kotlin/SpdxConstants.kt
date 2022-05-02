@@ -36,6 +36,14 @@ object SpdxConstants {
     const val NOASSERTION = "NOASSERTION"
 
     /**
+     * The tag to use in a line of source code to declare an SPDX ID.
+     *
+     * Note: The tag does not include the (actually required) trailing space after the colon to work around
+     * https://github.com/fsfe/reuse-tool/issues/463.
+     */
+    const val TAG = "SPDX-License-Identifier:"
+
+    /**
      * A prefix used in fields like "originator", "supplier", or "annotator" to describe a person.
      */
     const val PERSON = "Person: "
@@ -71,9 +79,16 @@ object SpdxConstants {
     const val LICENSE_LIST_URL = "https://spdx.org/licenses/"
 
     /**
+     * The package verification code for no input.
+     */
+    const val EMPTY_PACKAGE_VERIFICATION_CODE = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+    private val NOT_PRESENT_VALUES = setOf(null, NONE, NOASSERTION)
+
+    /**
      * Return true if and only if the given value is null or equals [NONE] or [NOASSERTION].
      */
-    fun isNotPresent(value: String?) = value in setOf(null, NONE, NOASSERTION)
+    fun isNotPresent(value: String?) = value in NOT_PRESENT_VALUES
 
     /**
      * Return true if and only if the given value is not null and does not equal [NONE] or [NOASSERTION].

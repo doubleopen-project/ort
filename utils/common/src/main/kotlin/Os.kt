@@ -54,8 +54,10 @@ object Os {
     /**
      * The currently set environment variables. Keys are case-insensitive on Windows.
      */
-    val env = System.getenv().let { env ->
-        if (isWindows) env.toSortedMap(String.CASE_INSENSITIVE_ORDER) else env.toSortedMap()
+    val env by lazy {
+        System.getenv().let { env ->
+            if (isWindows) env.toSortedMap(String.CASE_INSENSITIVE_ORDER) else env.toSortedMap()
+        }
     }
 
     /**
@@ -78,7 +80,7 @@ object Os {
         val fallbackUserHome = listOfNotNull(
             env["HOME"],
             env["USERPROFILE"]
-        ).firstOrNull {
+        ).find {
             it.isNotBlank()
         } ?: throw IllegalArgumentException("Unable to determine a user home directory.")
 
@@ -102,10 +104,10 @@ object Os {
         return if (isWindows) {
             val referencePattern = Regex("%(?<reference>\\w+)%")
 
-            paths.mapNotNull { path ->
+            paths.firstNotNullOfOrNull { path ->
                 val expandedPath = path.expandVariable(referencePattern, "reference")
                 resolveWindowsExecutable(File(expandedPath, executable))
-            }.firstOrNull()
+            }
         } else {
             val referencePattern = Regex("\\$\\{?(?<reference>\\w+)}?")
 

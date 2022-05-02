@@ -52,7 +52,6 @@ import org.ossreviewtoolkit.model.config.Resolutions
 import org.ossreviewtoolkit.model.config.SendMailConfiguration
 import org.ossreviewtoolkit.model.licenses.LicenseClassifications
 import org.ossreviewtoolkit.model.readValue
-import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
 import org.ossreviewtoolkit.notifier.Notifier
 import org.ossreviewtoolkit.reporter.HowToFixTextProvider
 import org.ossreviewtoolkit.reporter.ReporterInput
@@ -64,7 +63,9 @@ import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class ExamplesFunTest : StringSpec() {
     private val examplesDir = File("../examples")
-    private val exampleFiles = examplesDir.walk().filterTo(mutableListOf()) { it.isFile && it.extension != "md" }
+    private val exampleFiles = examplesDir.walk().maxDepth(1).filterTo(mutableListOf()) {
+        it.isFile && it.extension != "md"
+    }
 
     private fun takeExampleFile(name: String) = exampleFiles.single { it.name == name }.also { exampleFiles.remove(it) }
 
@@ -118,44 +119,6 @@ class ExamplesFunTest : StringSpec() {
             }
         }
 
-        "how-to-fix-text-provider.kts provides the expected how-to-fix text" {
-            val script = takeExampleFile("how-to-fix-text-provider.kts").readText()
-            val howToFixTextProvider = HowToFixTextProvider.fromKotlinScript(script, OrtResult.EMPTY)
-            val issue = OrtIssue(
-                message = "ERROR: Timeout after 360 seconds while scanning file 'src/res/data.json'.",
-                source = "ScanCode",
-                severity = Severity.ERROR,
-                timestamp = Instant.now()
-            )
-
-            val howToFixText = howToFixTextProvider.getHowToFixText(issue)
-
-            howToFixText shouldContain "Manually verify that the file does not contain any license information."
-        }
-
-        "rules.kts can be compiled and executed" {
-            val resultFile = File("src/funTest/assets/semver4j-analyzer-result.yml")
-            val licenseFile = File("../examples/license-classifications.yml")
-            val ortResult = resultFile.readValue<OrtResult>()
-            val evaluator = Evaluator(
-                ortResult = ortResult,
-                licenseInfoResolver = ortResult.createLicenseInfoResolver(),
-                licenseClassifications = licenseFile.readValue()
-            )
-
-            val script = takeExampleFile("rules.kts").readText()
-
-            val result = evaluator.run(script)
-
-            result.violations.map { it.rule } shouldContainExactlyInAnyOrder listOf(
-                "UNHANDLED_LICENSE",
-                "COPYLEFT_LIMITED_IN_SOURCE",
-                "VULNERABILITY_IN_PACKAGE",
-                "HIGH_SEVERITY_VULNERABILITY_IN_PACKAGE",
-                "DEPRECATED_SCOPE_EXCLUDE_REASON_IN_ORT_YML"
-            )
-        }
-
         "asciidoctor-pdf-theme.yml is a valid asciidoctor-pdf theme" {
             val outputDir = createSpecTempDir()
 
@@ -170,14 +133,37 @@ class ExamplesFunTest : StringSpec() {
             report shouldHaveSize 1
         }
 
-        "notifications.kts can be complied and executed" {
+        "example.rules.kts can be compiled and executed" {
+            val resultFile = File("src/funTest/assets/semver4j-analyzer-result.yml")
+            val licenseFile = File("../examples/license-classifications.yml")
+            val ortResult = resultFile.readValue<OrtResult>()
+            val evaluator = Evaluator(
+                ortResult = ortResult,
+                licenseClassifications = licenseFile.readValue()
+            )
+
+            val script = examplesDir.resolve("evaluator-rules/src/main/resources/example.rules.kts").readText()
+
+            val result = evaluator.run(script)
+
+            result.violations.map { it.rule } shouldContainExactlyInAnyOrder listOf(
+                "UNHANDLED_LICENSE",
+                "COPYLEFT_LIMITED_IN_SOURCE",
+                "VULNERABILITY_IN_PACKAGE",
+                "HIGH_SEVERITY_VULNERABILITY_IN_PACKAGE",
+                "DEPRECATED_SCOPE_EXCLUDE_REASON_IN_ORT_YML"
+            )
+        }
+
+        "example.notifications.kts can be complied and executed" {
             val greenMail = GreenMail(ServerSetup.SMTP.dynamicPort())
             greenMail.setUser("no-reply@oss-review-toolkit.org", "no-reply@oss-review-toolkit.org", "pwd")
             greenMail.start()
 
             val ortResult = File("src/funTest/assets/semver4j-analyzer-result.yml").readValue<OrtResult>()
             val notifier = Notifier(
-                ortResult, NotifierConfiguration(
+                ortResult,
+                NotifierConfiguration(
                     SendMailConfiguration(
                         hostName = "localhost",
                         port = greenMail.smtp.serverSetup.port,
@@ -189,9 +175,9 @@ class ExamplesFunTest : StringSpec() {
                 )
             )
 
-            val notifications = takeExampleFile("notifications.kts").readText()
+            val script = examplesDir.resolve("notifications/src/main/resources/example.notifications.kts").readText()
 
-            notifier.run(notifications)
+            notifier.run(script)
 
             greenMail.waitForIncomingEmail(1000, 1) shouldBe true
             val actualBody = GreenMailUtil.getBody(greenMail.receivedMessages[0])
@@ -201,6 +187,21 @@ class ExamplesFunTest : StringSpec() {
             actualBody shouldContain "Number of issues found: ${ortResult.collectIssues().size}"
 
             greenMail.stop()
+        }
+
+        "how-to-fix-text-provider.kts provides the expected how-to-fix text" {
+            val script = takeExampleFile("how-to-fix-text-provider.kts").readText()
+            val howToFixTextProvider = HowToFixTextProvider.fromKotlinScript(script, OrtResult.EMPTY)
+            val issue = OrtIssue(
+                message = "ERROR: Timeout after 360 seconds while scanning file 'src/res/data.json'.",
+                source = "ScanCode",
+                severity = Severity.ERROR,
+                timestamp = Instant.now()
+            )
+
+            val howToFixText = howToFixTextProvider.getHowToFixText(issue)
+
+            howToFixText shouldContain "Manually verify that the file does not contain any license information."
         }
 
         "All example files should have been tested" {

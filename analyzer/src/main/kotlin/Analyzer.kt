@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +53,7 @@ class Analyzer(private val config: AnalyzerConfiguration, private val labels: Ma
     @JvmOverloads
     fun findManagedFiles(
         absoluteProjectPath: File,
-        packageManagers: List<PackageManagerFactory> = PackageManager.ALL,
+        packageManagers: Set<PackageManagerFactory> = PackageManager.ALL,
         repositoryConfiguration: RepositoryConfiguration = RepositoryConfiguration()
     ): ManagedFileInfo {
         require(absoluteProjectPath.isAbsolute)
@@ -80,8 +81,9 @@ class Analyzer(private val config: AnalyzerConfiguration, private val labels: Ma
             it.parentFile.absoluteFile == absoluteProjectPath
         }
 
-        if (factoryFiles.isEmpty() || !hasDefinitionFileInRootDirectory) {
-            Unmanaged.Factory().create(absoluteProjectPath, config, repositoryConfiguration).let {
+        val unmanagedFactory = packageManagers.find { it is Unmanaged.Factory }
+        if (unmanagedFactory != null && (factoryFiles.isEmpty() || !hasDefinitionFileInRootDirectory)) {
+            unmanagedFactory.create(absoluteProjectPath, config, repositoryConfiguration).let {
                 managedFiles[it] = listOf(absoluteProjectPath)
             }
         }
@@ -133,9 +135,16 @@ class Analyzer(private val config: AnalyzerConfiguration, private val labels: Ma
                 async {
                     val results = manager.resolveDependencies(files, labels)
 
-                    // By convention, project ids must be of the type of the respective package manager.
+                    // By convention, project ids must be of the type of the respective package manager. An exception
+                    // for this is Pub with Flutter, which internally calls Gradle.
                     results.projectResults.forEach { (_, result) ->
-                        val invalidProjects = result.filter { it.project.id.type != manager.managerName }
+                        val invalidProjects = result.filterNot {
+                            val projectType = it.project.id.type
+
+                            projectType == manager.managerName ||
+                                    (manager.managerName == "Pub" && projectType == "Gradle")
+                        }
+
                         require(invalidProjects.isEmpty()) {
                             val projectString = invalidProjects.joinToString { "'${it.project.id.toCoordinates()}'" }
                             "Projects $projectString must be of type '${manager.managerName}'."

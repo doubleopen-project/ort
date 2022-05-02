@@ -85,7 +85,7 @@ internal fun resolvePath(pieces: List<String>) = pieces.reduce { right, left -> 
  */
 class OpossumReporter : Reporter {
     companion object {
-        const val OPTION_SCANNER_MAXDEPTH = "scanner.maxDepth"
+        const val OPTION_SCANNER_MAX_DEPTH = "scanner.maxDepth"
         const val OPTION_EXCLUDED_SCOPES = "scopes.excluded"
     }
 
@@ -101,34 +101,32 @@ class OpossumReporter : Reporter {
         val excludeFromNotice: Boolean = false,
         val uuid: UUID = UUID.randomUUID()
     ) {
-        fun toJson(): Map<*, *> {
-            return sortedMapOf(
-                uuid.toString() to sortedMapOf(
-                    "source" to sortedMapOf(
-                        "name" to source,
-                        "documentConfidence" to 80
-                    ),
+        fun toJson(): Map<*, *> = sortedMapOf(
+            uuid.toString() to sortedMapOf(
+                "source" to sortedMapOf(
+                    "name" to source,
+                    "documentConfidence" to 80
+                ),
 
-                    "attributionConfidence" to 80,
+                "attributionConfidence" to 80,
 
-                    "packageType" to id?.getPurlType(),
-                    "packageNamespace" to id?.namespace,
-                    "packageName" to id?.name,
-                    "packageVersion" to id?.version,
+                "packageType" to id?.getPurlType(),
+                "packageNamespace" to id?.namespace,
+                "packageName" to id?.name,
+                "packageVersion" to id?.version,
 
-                    "copyright" to copyright,
-                    "licenseName" to license?.toString(),
+                "copyright" to copyright,
+                "licenseName" to license?.toString(),
 
-                    "url" to url,
+                "url" to url,
 
-                    "preSelected" to preselected,
-                    "followUp" to "FOLLOW_UP".takeIf { followUp },
-                    "excludeFromNotice" to excludeFromNotice,
+                "preSelected" to preselected,
+                "followUp" to "FOLLOW_UP".takeIf { followUp },
+                "excludeFromNotice" to excludeFromNotice,
 
-                    "comment" to comment
-                )
+                "comment" to comment
             )
-        }
+        )
 
         fun matches(other: OpossumSignal): Boolean =
             source == other.source
@@ -143,7 +141,7 @@ class OpossumReporter : Reporter {
     data class OpossumResources(
         val tree: MutableMap<String, OpossumResources> = mutableMapOf()
     ) {
-        fun addResource(pathPieces: List<String>) {
+        private fun addResource(pathPieces: List<String>) {
             if (pathPieces.isEmpty()) return
 
             val head = pathPieces.first()
@@ -197,7 +195,9 @@ class OpossumReporter : Reporter {
         )
 
         override fun compareTo(other: OpossumFrequentLicense) =
-            compareValuesBy(this, other,
+            compareValuesBy(
+                this,
+                other,
                 { it.shortName },
                 { it.fullName },
                 { it.defaultText }
@@ -247,11 +247,11 @@ class OpossumReporter : Reporter {
                 ?.mapNotNull { uuid -> signals.find { it.uuid == uuid } }
                 .orEmpty()
 
-        fun addAttributionBreakpoint(breakpoint: String) {
+        private fun addAttributionBreakpoint(breakpoint: String) {
             attributionBreakpoints += resolvePath(breakpoint, isDirectory = true)
         }
 
-        fun addFileWithChildren(fileWithChildren: String) {
+        private fun addFileWithChildren(fileWithChildren: String) {
             filesWithChildren += resolvePath(fileWithChildren, isDirectory = true)
         }
 
@@ -277,7 +277,7 @@ class OpossumReporter : Reporter {
             return key
         }
 
-        fun addPackageRoot(id: Identifier, path: String, level: Int = 0, vcs: VcsInfo = VcsInfo.EMPTY) {
+        private fun addPackageRoot(id: Identifier, path: String, level: Int = 0, vcs: VcsInfo = VcsInfo.EMPTY) {
             val mapOfId = packageToRoot.getOrPut(id) { sortedMapOf() }
             val oldLevel = mapOfId.getOrDefault(path, level)
             mapOfId[path] = min(level, oldLevel)
@@ -286,7 +286,7 @@ class OpossumReporter : Reporter {
             addBaseURL(path, vcs)
         }
 
-        fun addSignal(signal: OpossumSignal, paths: SortedSet<String>) {
+        private fun addSignal(signal: OpossumSignal, paths: SortedSet<String>) {
             if (paths.isEmpty()) return
 
             val matchingSignal = signals.find { it.matches(signal) }
@@ -297,15 +297,14 @@ class OpossumReporter : Reporter {
                 matchingSignal.uuid
             }
 
-            paths.forEach {
-                log.trace { "add signal ${signal.id} of source ${signal.source} to $it" }
-                resources.addResource(it)
-                val itAsID = resolvePath(it)
-                pathToSignal.getOrPut(itAsID) { sortedSetOf() } += uuidOfSignal
+            paths.forEach { path ->
+                log.debug { "add signal ${signal.id} of source ${signal.source} to $path" }
+                resources.addResource(path)
+                pathToSignal.getOrPut(resolvePath(path)) { sortedSetOf() } += uuidOfSignal
             }
         }
 
-        fun signalFromPkg(pkg: Package, id: Identifier = pkg.id): OpossumSignal {
+        private fun signalFromPkg(pkg: Package, id: Identifier = pkg.id): OpossumSignal {
             val source = addExternalAttributionSource("ORT-Package", "ORT-Package", 180)
             return OpossumSignal(
                 source,
@@ -316,7 +315,7 @@ class OpossumReporter : Reporter {
             )
         }
 
-        fun addDependency(
+        private fun addDependency(
             dependency: PackageReference,
             curatedPackages: SortedSet<CuratedPackage>,
             relRoot: String,
@@ -342,19 +341,23 @@ class OpossumReporter : Reporter {
             }
         }
 
-        fun addDependencyScope(scope: Scope, curatedPackages: SortedSet<CuratedPackage>, relRoot: String = "/") {
+        private fun addDependencyScope(
+            scope: Scope,
+            curatedPackages: SortedSet<CuratedPackage>,
+            relRoot: String = "/"
+        ) {
             val name = scope.name
-            log.debug("$relRoot - $name - DependencyScope")
+            log.debug { "$relRoot - $name - DependencyScope" }
 
             val rootForScope = resolvePath(relRoot, name)
             if (scope.dependencies.isNotEmpty()) addAttributionBreakpoint(rootForScope)
             scope.dependencies.forEachIndexed { index, dependency ->
-                log.debug("scope -> dependency ${index + 1} of ${scope.dependencies.size}")
+                log.debug { "scope -> dependency ${index + 1} of ${scope.dependencies.size}" }
                 addDependency(dependency, curatedPackages, rootForScope)
             }
         }
 
-        fun getRootForProject(project: Project, relRoot: String): String {
+        private fun getRootForProject(project: Project, relRoot: String): String {
             val vcsPath = resolvePath(relRoot, project.vcs.path)
             val definitionFilePath = resolvePath(relRoot, project.definitionFilePath)
             return if (definitionFilePath.startsWith(vcsPath)) {
@@ -372,7 +375,7 @@ class OpossumReporter : Reporter {
         ) {
             val projectId = project.id
             val definitionFilePath = resolvePath(relRoot, project.definitionFilePath)
-            log.debug("$definitionFilePath - $projectId - Project")
+            log.debug { "$definitionFilePath - $projectId - Project" }
             val projectRoot = getRootForProject(project, relRoot)
             addPackageRoot(projectId, projectRoot, 0, project.toPackage().vcsProcessed)
             addFileWithChildren(definitionFilePath)
@@ -392,20 +395,20 @@ class OpossumReporter : Reporter {
             project.scopes
                 .filterNot { it.name in excludedScopes }
                 .forEachIndexed { index, scope ->
-                    log.debug("analyzerResultProject -> scope ${index + 1} of ${project.scopes.size}")
+                    log.debug { "analyzerResultProject -> scope ${index + 1} of ${project.scopes.size}" }
                     addDependencyScope(scope, curatedPackages, definitionFilePath)
                 }
         }
 
-        fun addScannerResult(id: Identifier, result: ScanResult, maxDepth: Int) {
+        private fun addScannerResult(id: Identifier, result: ScanResult, maxDepth: Int) {
             val scanner = "${result.scanner.name}@${result.scanner.version}"
             val roots = packageToRoot[id]
             if (roots == null) {
-                log.info("No root for $id from $scanner")
+                log.info { "No root for $id from $scanner" }
                 return
             }
 
-            log.debug("add scanner results for $id from $scanner to ${roots.size} roots")
+            log.debug { "add scanner results for $id from $scanner to ${roots.size} roots" }
 
             val licenseFindings = result.summary.licenseFindings
             val copyrightFindings = result.summary.copyrightFindings
@@ -436,9 +439,10 @@ class OpossumReporter : Reporter {
                         copyright = copyright,
                         license = license
                     )
-                    addSignal(pathSignal,
-                        rootsBelowMaxDepth.map { resolvePath(it, pathFromFinding) }
-                            .toSortedSet())
+                    addSignal(
+                        pathSignal,
+                        rootsBelowMaxDepth.map { resolvePath(it, pathFromFinding) }.toSortedSet()
+                    )
                 }
             }
 
@@ -470,10 +474,10 @@ class OpossumReporter : Reporter {
             results.forEach { addScannerResult(id, it, maxDepth) }
         }
 
-        fun addIssue(issue: OrtIssue, relatedId: Identifier, source: String) {
-            val roots = packageToRoot[relatedId]
+        fun addIssue(issue: OrtIssue, id: Identifier, source: String) {
+            val roots = packageToRoot[id]
             val paths = if (roots.isNullOrEmpty()) {
-                log.info("No root for $relatedId")
+                log.info { "No root for $id" }
                 mutableSetOf("/")
             } else {
                 roots.keys
@@ -500,7 +504,7 @@ class OpossumReporter : Reporter {
 
     override val reporterName = "Opossum"
 
-    fun writeReport(outputFile: File, opossumInput: OpossumInput) {
+    private fun writeReport(outputFile: File, opossumInput: OpossumInput) {
         FileOutputStream(outputFile, /* append = */ false).use { outputStream ->
             val gzipParameters = GzipParameters().apply {
                 compressionLevel = Deflater.BEST_COMPRESSION
@@ -527,11 +531,11 @@ class OpossumReporter : Reporter {
             opossumInput.frequentLicenses += OpossumFrequentLicense(it.id, it.fullName, licenseText)
         }
 
-        val analyzerResult = ortResult.analyzer?.result?.withScopesResolved() ?: return opossumInput
+        val analyzerResult = ortResult.analyzer?.result?.withResolvedScopes() ?: return opossumInput
         val analyzerResultProjects = analyzerResult.projects
         val analyzerResultPackages = analyzerResult.packages
         analyzerResultProjects.forEachIndexed { index, project ->
-            log.debug("analyzerResultProject ${index + 1} of ${analyzerResultProjects.size}")
+            log.debug { "analyzerResultProject ${index + 1} of ${analyzerResultProjects.size}" }
             opossumInput.addProject(project, analyzerResultPackages, excludedScopes)
         }
         if (excludedScopes.isEmpty()) {
@@ -550,7 +554,7 @@ class OpossumReporter : Reporter {
 
         val scannerResults = ortResult.scanner?.results?.scanResults ?: return OpossumInput()
         scannerResults.entries.forEachIndexed { index, entry ->
-            log.debug("scannerResult ${index + 1} of ${scannerResults.entries.size}")
+            log.debug { "scannerResult ${index + 1} of ${scannerResults.entries.size}" }
             opossumInput.addScannerResults(entry.key, entry.value, maxDepth)
         }
 
@@ -562,7 +566,7 @@ class OpossumReporter : Reporter {
         outputDir: File,
         options: Map<String, String>
     ): List<File> {
-        val maxDepth = options.getOrDefault(OPTION_SCANNER_MAXDEPTH, "3").toInt()
+        val maxDepth = options.getOrDefault(OPTION_SCANNER_MAX_DEPTH, "3").toInt()
         val excludedScopes = options.getOrDefault(OPTION_EXCLUDED_SCOPES, "devDependencies,test").split(",").toSet()
         val opossumInput = generateOpossumInput(input.ortResult, excludedScopes, maxDepth)
 

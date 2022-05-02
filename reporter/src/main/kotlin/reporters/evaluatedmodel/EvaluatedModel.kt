@@ -36,6 +36,7 @@ import org.ossreviewtoolkit.model.OrtIssue
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Repository
 import org.ossreviewtoolkit.model.RuleViolation
+import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.config.IssueResolution
 import org.ossreviewtoolkit.model.config.LicenseFindingCuration
 import org.ossreviewtoolkit.model.config.PathExclude
@@ -107,6 +108,8 @@ data class EvaluatedModel(
     val vulnerabilities: List<EvaluatedVulnerability>,
     val statistics: Statistics,
     val repository: Repository,
+    val severeIssueThreshold: Severity,
+    val severeRuleViolationThreshold: Severity,
 
     /**
      * The repository configuration as YAML string. Required to be able to easily show the repository configuration in
@@ -127,11 +130,13 @@ data class EvaluatedModel(
             EvaluatedRuleViolation::class.java,
             EvaluatedScanResult::class.java,
             EvaluatedScope::class.java,
+            EvaluatedVulnerability::class.java,
             IssueResolution::class.java,
             LicenseId::class.java,
             PathExclude::class.java,
             RuleViolationResolution::class.java,
-            ScopeExclude::class.java
+            ScopeExclude::class.java,
+            VulnerabilityResolution::class.java
         )
 
         private val JSON_MAPPER by lazy {

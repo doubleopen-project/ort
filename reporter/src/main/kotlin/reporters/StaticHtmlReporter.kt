@@ -544,7 +544,7 @@ class StaticHtmlReporter : Reporter {
                     dl {
                         dd {
                             row.detectedLicenses.forEach { license ->
-                                val firstFinding = license.locations.firstOrNull { it.matchingPathExcludes.isEmpty() }
+                                val firstFinding = license.locations.find { it.matchingPathExcludes.isEmpty() }
                                     ?: license.locations.firstOrNull()
 
                                 val permalink = firstFinding?.permalink(row.id)
@@ -636,7 +636,7 @@ class StaticHtmlReporter : Reporter {
     private fun DIV.licenseLink(license: String) {
         val licenseResourcePath = getLicenseResourcePath(license)
         val sha1Git = licensesSha1.getOrPut(license) {
-            HashAlgorithm.SHA1_GIT.calculate(licenseResourcePath) ?: license
+            HashAlgorithm.SHA1GIT.calculate(licenseResourcePath) ?: license
         }
 
         if (sha1Git == license) {
@@ -675,7 +675,7 @@ class StaticHtmlReporter : Reporter {
 private fun getLicenseResourcePath(license: String): String =
     when {
         license.startsWith(SpdxConstants.LICENSE_REF_PREFIX) -> "/licenserefs/$license"
-        license.contains("exception") -> "/exceptions/$license"
+        "exception" in license -> "/exceptions/$license"
         else -> "/licenses/$license"
     }
 

@@ -31,6 +31,7 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
+import org.ossreviewtoolkit.model.utils.parseRepoManifestPath
 import org.ossreviewtoolkit.utils.core.log
 
 /**
@@ -45,6 +46,9 @@ class Unmanaged(
     repoConfig: RepositoryConfiguration
 ) : PackageManager(name, analysisRoot, analyzerConfig, repoConfig) {
     class Factory : AbstractPackageManagerFactory<Unmanaged>("Unmanaged") {
+        // The empty list returned here deliberately causes this special package manager to never be considered in
+        // PackageManager.findManagedFiles(). Instead, it will only be explicitly instantiated as part of
+        // Analyzer.findManagedFiles().
         override val globsForDefinitionFiles = emptyList<String>()
 
         override fun create(
@@ -83,10 +87,13 @@ class Unmanaged(
             vcsInfo.type == VcsType.GIT_REPO -> {
                 // For GitRepo looking at the URL and revision only is not enough, we also need to take the used
                 // manifest into account.
+                val manifestPath = vcsInfo.url.parseRepoManifestPath()
+
                 Identifier(
                     type = managerName,
-                    namespace = vcsInfo.path.substringBeforeLast('/'),
-                    name = vcsInfo.path.substringAfterLast('/').removeSuffix(".xml"),
+                    namespace = manifestPath?.substringBeforeLast('/').orEmpty(),
+                    name = manifestPath?.substringAfterLast('/')?.removeSuffix(".xml")
+                        ?: vcsInfo.url.split('/').last().removeSuffix(".git"),
                     version = vcsInfo.revision
                 )
             }

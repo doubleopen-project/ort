@@ -22,6 +22,7 @@ package org.ossreviewtoolkit.detekt
 import io.github.detekt.psi.toFilePath
 
 import io.gitlab.arturbosch.detekt.api.CodeSmell
+import io.gitlab.arturbosch.detekt.api.Config
 import io.gitlab.arturbosch.detekt.api.Debt
 import io.gitlab.arturbosch.detekt.api.Entity
 import io.gitlab.arturbosch.detekt.api.Issue
@@ -34,7 +35,7 @@ import org.jetbrains.kotlin.psi.KtPackageDirective
 
 private const val ORT_PACKAGE_NAMESPACE = "org.ossreviewtoolkit"
 
-class OrtPackageNaming : Rule() {
+class OrtPackageNaming(config: Config) : Rule(config) {
     private val pathPattern = Regex("""[/\\]src[/\\][^/\\]+[/\\]kotlin[/\\]""")
     private val forwardOrBackwardSlashPattern = Regex("""[/\\]""")
 
@@ -53,7 +54,7 @@ class OrtPackageNaming : Rule() {
         if (directive.qualifiedName.isEmpty() || directive.qualifiedName.startsWith("test.")) return
 
         val path = directive.containingKtFile.toFilePath().relativePath.toString()
-        if (!path.contains(pathPattern)) return
+        if (pathPattern !in path) return
 
         val (pathPrefix, pathSuffix) = path.split(pathPattern, 2).map { File(it) }
         val projectDir = pathPrefix.name
@@ -61,7 +62,6 @@ class OrtPackageNaming : Rule() {
 
         // Maintain a hard-coded mapping of exceptions to the general package naming rules.
         val projectName = when (projectDir) {
-            "buildSrc" -> ".gradle"
             "detekt-rules" -> ".detekt"
             "fossid-webapp" -> ".fossid"
             "github-graphql" -> ".github"

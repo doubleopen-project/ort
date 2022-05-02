@@ -32,7 +32,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.deser.ContextualDeserializer
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer
-import com.fasterxml.jackson.databind.json.JsonMapper
+import com.fasterxml.jackson.module.kotlin.jsonMapper
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 
 import okhttp3.OkHttpClient
@@ -44,10 +44,12 @@ import org.ossreviewtoolkit.clients.fossid.model.identification.identifiedFiles.
 import org.ossreviewtoolkit.clients.fossid.model.identification.ignored.IgnoredFile
 import org.ossreviewtoolkit.clients.fossid.model.identification.markedAsIdentified.MarkedAsIdentifiedFile
 import org.ossreviewtoolkit.clients.fossid.model.result.FossIdScanResult
+import org.ossreviewtoolkit.clients.fossid.model.rules.IgnoreRule
 import org.ossreviewtoolkit.clients.fossid.model.status.DownloadStatus
 import org.ossreviewtoolkit.clients.fossid.model.status.ScanDescription
 import org.ossreviewtoolkit.clients.fossid.model.status.ScanDescription2021dot2
 
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.jackson.JacksonConverterFactory
 import retrofit2.http.Body
@@ -59,13 +61,15 @@ interface FossIdRestService {
         /**
          * The mapper for JSON (de-)serialization used by this service.
          */
-        val JSON_MAPPER: ObjectMapper = JsonMapper()
-            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+        val JSON_MAPPER: ObjectMapper = jsonMapper {
+            propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             // FossID has a bug in get_results/scan.
             // Sometimes the match_type is "ignored", sometimes it is "Ignored".
-            .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
-            .registerModule(kotlinModule()
-                .addDeserializer(PolymorphicList::class.java, PolymorphicListDeserializer()))
+            enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
+            addModule(
+                kotlinModule().addDeserializer(PolymorphicList::class.java, PolymorphicListDeserializer())
+            )
+        }
 
         /**
          * A class to modify the standard Jackson deserialization to deal with inconsistencies in responses
@@ -172,6 +176,15 @@ interface FossIdRestService {
 
     @POST("api.php")
     suspend fun listPendingFiles(@Body body: PostRequestBody): PolymorphicResponseBody<String>
+
+    @POST("api.php")
+    suspend fun listIgnoreRules(@Body body: PostRequestBody): PolymorphicResponseBody<IgnoreRule>
+
+    @POST("api.php")
+    suspend fun createIgnoreRule(@Body body: PostRequestBody): EntityResponseBody<Nothing>
+
+    @POST("api.php")
+    suspend fun generateReport(@Body body: PostRequestBody): Response<ResponseBody>
 
     @GET("index.php?form=login")
     suspend fun getLoginPage(): ResponseBody

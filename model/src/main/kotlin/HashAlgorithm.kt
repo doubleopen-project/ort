@@ -26,7 +26,8 @@ import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
 
-import org.ossreviewtoolkit.utils.common.toHexString
+import org.ossreviewtoolkit.utils.common.calculateHash
+import org.ossreviewtoolkit.utils.common.encodeHex
 
 /**
  * An enum of supported hash algorithms. Each algorithm has one or more [aliases] associated to it, where the first
@@ -51,29 +52,29 @@ enum class HashAlgorithm(private vararg val aliases: String, val verifiable: Boo
     /**
      * The Secure Hash Algorithm 1, see [SHA-1](https://en.wikipedia.org/wiki/SHA-1).
      */
-    SHA1("SHA-1", "SHA1"),
+    SHA1("SHA1", "SHA-1"),
 
     /**
      * The Secure Hash Algorithm 2 with 256 bits, see [SHA-256](https://en.wikipedia.org/wiki/SHA-256).
      */
-    SHA256("SHA-256", "SHA256"),
+    SHA256("SHA256", "SHA-256"),
 
     /**
      * The Secure Hash Algorithm 2 with 384 bits, see [SHA-384](https://en.wikipedia.org/wiki/SHA-384).
      */
-    SHA384("SHA-384", "SHA384"),
+    SHA384("SHA384", "SHA-384"),
 
     /**
      * The Secure Hash Algorithm 2 with 512 bits, see [SHA-512](https://en.wikipedia.org/wiki/SHA-512).
      */
-    SHA512("SHA-512", "SHA512"),
+    SHA512("SHA512", "SHA-512"),
 
     /**
      * The Secure Hash Algorithm 1, but calculated on a Git "blob" object, see
      * - https://git-scm.com/book/en/v2/Git-Internals-Git-Objects#_object_storage
      * - https://docs.softwareheritage.org/devel/swh-model/persistent-identifiers.html#git-compatibility
      */
-    SHA1_GIT("SHA-1-GIT", "SHA1-GIT", "SHA1GIT") {
+    SHA1GIT("SHA1GIT", "SHA1-GIT", "SHA-1-GIT", "SWHID") {
         override fun getMessageDigest(size: Long): MessageDigest =
             MessageDigest.getInstance(SHA1.toString()).apply {
                 val header = "blob $size\u0000"
@@ -135,25 +136,16 @@ enum class HashAlgorithm(private vararg val aliases: String, val verifiable: Boo
     }
 
     /**
-     * Return the hexadecimal digest of this hash for the given [inputStream] and [size]. The caller is responsible for
-     * closing the stream.
+     * Return the message digest to use for this [HashAlgorithm], which might depend on the [size].
      */
-    fun calculate(inputStream: InputStream, size: Long): String {
-        // 4MB has been chosen rather arbitrarily, hoping that it provides good performance while not consuming a
-        // lot of memory at the same time, also considering that this function could potentially be run on multiple
-        // threads in parallel.
-        val buffer = ByteArray(4 * 1024 * 1024)
-        val digest = getMessageDigest(size)
-
-        var length: Int
-        while (inputStream.read(buffer).also { length = it } > 0) {
-            digest.update(buffer, 0, length)
-        }
-
-        return digest.digest().toHexString()
-    }
-
     protected open fun getMessageDigest(size: Long): MessageDigest =
         // Disregard the size in the standard case.
         MessageDigest.getInstance(toString())
+
+    /**
+     * Return the hexadecimal digest of this hash for the given [inputStream] and [size]. The caller is responsible for
+     * closing the stream.
+     */
+    private fun calculate(inputStream: InputStream, size: Long): String =
+        calculateHash(inputStream, getMessageDigest(size)).encodeHex()
 }

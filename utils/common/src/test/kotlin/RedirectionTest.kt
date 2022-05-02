@@ -28,7 +28,7 @@ import io.kotest.matchers.shouldBe
 import java.util.Scanner
 
 class RedirectionTest : WordSpec({
-    listener(SpecSystemExitListener)
+    register(SpecSystemExitListener)
 
     "Redirecting output" should {
         // Use a relatively large number of lines that results in more than 64k to be written to test against the pipe
@@ -83,7 +83,7 @@ class RedirectionTest : WordSpec({
             var e: SystemExitException? = null
 
             val stdout = redirectStdout {
-                e = shouldThrow<SystemExitException> {
+                e = shouldThrow {
                     for (i in 1..numberOfLines) System.out.println("stdout: $i")
                     System.exit(42)
                 }

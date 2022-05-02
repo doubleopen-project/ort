@@ -20,38 +20,91 @@
 package org.ossreviewtoolkit.notifier.modules
 
 import com.atlassian.jira.rest.client.api.JiraRestClient
-import com.atlassian.jira.rest.client.api.RestClientException
 import com.atlassian.jira.rest.client.api.domain.BasicIssue
 import com.atlassian.jira.rest.client.api.domain.Comment
+import com.atlassian.jira.rest.client.api.domain.Issue
 import com.atlassian.jira.rest.client.api.domain.input.IssueInputBuilder
+import com.atlassian.jira.rest.client.api.domain.input.TransitionInput
 import com.atlassian.jira.rest.client.internal.async.AsynchronousJiraRestClientFactory
 
 import java.net.URI
 
-import org.ossreviewtoolkit.model.Failure
-import org.ossreviewtoolkit.model.Result
-import org.ossreviewtoolkit.model.Success
 import org.ossreviewtoolkit.model.config.JiraConfiguration
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
 import org.ossreviewtoolkit.utils.core.log
 
-class JiraNotifier(
-    val config: JiraConfiguration,
-    private val restClient: JiraRestClient = AsynchronousJiraRestClientFactory()
-        .createWithBasicHttpAuthentication(URI(config.host), config.username, config.password)
-) {
+class JiraNotifier(private val restClient: JiraRestClient) {
+    constructor(config: JiraConfiguration) : this(
+        AsynchronousJiraRestClientFactory()
+            .createWithBasicHttpAuthentication(URI(config.host), config.username, config.password)
+    )
+
+    /**
+     * Create a [comment] within the issue specified by the [issueKey].
+     */
+    @Suppress("UNUSED") // This is intended to be used via scripting.
+    fun createComment(issueKey: String, comment: String) {
+        val issue = restClient.issueClient.getIssue(issueKey).claim()
+
+        restClient.issueClient.addComment(issue.commentsUri, Comment.valueOf(comment)).claim()
+    }
+
+    /**
+     * Change the [assignee] of the give issue specified by the [issueKey].
+     */
+    fun changeAssignee(issueKey: String, assignee: String): Boolean {
+        val input = IssueInputBuilder().setAssigneeName(assignee).build()
+
+        return runCatching {
+            restClient.issueClient.updateIssue(issueKey, input)
+        }.onFailure {
+            log.error {
+                "Could not set the assignee to '$assignee' for issue '$issueKey': ${it.collectMessagesAsString()}"
+            }
+        }.isSuccess
+    }
+
+    /**
+     * Change the [state] of the given issue specified by the [issueKey].
+     */
+    fun changeState(issueKey: String, state: String): Boolean {
+        val issue = restClient.issueClient.getIssue(issueKey).claim()
+        val possibleTransitions = restClient.issueClient.getTransitions(issue).claim()
+
+        return runCatching {
+            val transition = possibleTransitions.single { it.name == state }
+            restClient.issueClient.transition(issue, TransitionInput(transition.id)).claim()
+        }.onFailure {
+            log.error {
+                "The transition to state '$state' for the issue '$issueKey' is not possible: " +
+                        it.collectMessagesAsString()
+            }
+        }.isSuccess
+    }
+
+    /**
+     * Return the issue for the given [issueKey].
+     */
+    fun getIssue(issueKey: String): Issue? {
+        return runCatching {
+            restClient.issueClient.getIssue(issueKey).claim()
+        }.onFailure {
+            log.error {
+                "Could not retrieve the issue with the key '$issueKey' due to: ${it.collectMessagesAsString()}"
+            }
+        }.getOrNull()
+    }
+
     /**
      * Returns a [ProjectIssueBuilder] object, which can be used to do operations for the given [projectKey].
      */
     fun projectIssueBuilder(projectKey: String): ProjectIssueBuilder =
         ProjectIssueBuilder(projectKey, restClient)
 
-    class ProjectIssueBuilder(
-        private val projectKey: String,
-        private val restClient: JiraRestClient
-        ) {
-        private val issueTypes = restClient.projectClient.getProject(projectKey).claim()
-            .issueTypes.associateBy { it.name }
+    class ProjectIssueBuilder(private val projectKey: String, private val restClient: JiraRestClient) {
+        private val issueTypes by lazy {
+            restClient.projectClient.getProject(projectKey).claim().issueTypes.associateBy { it.name }
+        }
 
         /**
          * Create an issue for the project with the usage of [summary], [description] and [issueType]. If an [assignee]
@@ -69,17 +122,21 @@ class JiraNotifier(
             avoidDuplicates: Boolean = true
         ): Result<BasicIssue> {
             if (issueType !in issueTypes) {
-                return Failure("The issue type '$issueType' is not valid. Use a valid issue type, specified in " +
-                        "your project '$projectKey'")
+                return Result.failure(
+                    IllegalArgumentException(
+                        "The issue type '$issueType' is not valid. Use a valid issue type as specified in your " +
+                                "project '$projectKey'."
+                    )
+                )
             }
 
-            val issueInputBuilder = IssueInputBuilder()
+            val issueInput = IssueInputBuilder()
                 .setProjectKey(projectKey)
                 .setSummary(summary)
                 .setDescription(description)
                 .setIssueType(issueTypes[issueType])
-            assignee?.let { issueInputBuilder.setAssigneeName(assignee) }
-            val issueInput = issueInputBuilder.build()
+                .apply { if (assignee != null) setAssigneeName(assignee) }
+                .build()
 
             if (avoidDuplicates) {
                 val searchResult = restClient.searchClient.searchJql(
@@ -91,48 +148,45 @@ class JiraNotifier(
                 //       An improvement has to be added here so that it can handle the case that the search returns more
                 //       than one issue.
                 if (searchResult.total == 1) {
-                    val issue = restClient.issueClient.getIssue(searchResult.issues.iterator().next().key).claim()
+                    val issue = searchResult.issues.first()
                     val comment = "$summary\n$description"
 
                     if (comment in issue.comments.mapNotNull { it.body }) {
-                        log.debug { "The comment for the issue '$summary' already exists," +
-                                " therefore no new one will be added." }
+                        log.debug {
+                            "The comment for the issue '$summary' already exists, therefore no new one will be added."
+                        }
 
-                        return Success(issue)
+                        return Result.success(issue)
                     }
 
-                    return try {
-                        restClient.issueClient.addComment(
-                            issue.commentsUri,
-                            Comment.valueOf(comment)
-                        ).claim()
-
-                        Success(issue)
-                    } catch (e: RestClientException) {
-                        log.error { "The comment for the issue '${issue.key} could not be added: " +
-                                e.collectMessagesAsString() }
-
-                        Failure(e.collectMessagesAsString())
+                    return runCatching {
+                        restClient.issueClient.addComment(issue.commentsUri, Comment.valueOf(comment)).claim()
+                    }.map { issue }.onFailure {
+                        log.error {
+                            "The comment for the issue '${issue.key} could not be added: " +
+                                    it.collectMessagesAsString()
+                        }
                     }
                 } else if (searchResult.total > 1) {
                     log.debug { "There are more than 1 duplicate issues of '$summary', which is not supported yet." }
 
-                    return Failure("There are more than 1 duplicate issues of '$summary'," +
-                            " which is not supported yet.")
+                    return Result.failure(
+                        IllegalArgumentException(
+                            "There are more than 1 duplicate issues of '$summary', which is not supported yet."
+                        )
+                    )
                 }
             }
 
-            return try {
-                val resultIssue = restClient.issueClient.createIssue(issueInput).claim()
-
-                log.info { "Issue ${resultIssue.key} created." }
-
-                Success(resultIssue)
-            } catch (e: RestClientException) {
-                log.error { "The issue for the project '$projectKey' could not be created: " +
-                        e.collectMessagesAsString() }
-
-                Failure(e.collectMessagesAsString())
+            return runCatching {
+                restClient.issueClient.createIssue(issueInput).claim().also {
+                    log.info { "Issue ${it.key} created." }
+                }
+            }.onFailure {
+                log.error {
+                    "The issue for the project '$projectKey' could not be created: " +
+                            it.collectMessagesAsString()
+                }
             }
         }
     }

@@ -33,6 +33,7 @@ import org.ossreviewtoolkit.model.orEmpty
 import org.ossreviewtoolkit.utils.common.CommandLineTool
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
 import org.ossreviewtoolkit.utils.common.uppercaseFirstChar
+import org.ossreviewtoolkit.utils.core.ORT_REPO_CONFIG_FILENAME
 import org.ossreviewtoolkit.utils.core.log
 import org.ossreviewtoolkit.utils.core.showStackTrace
 
@@ -41,9 +42,12 @@ abstract class VersionControlSystem {
         private val LOADER = ServiceLoader.load(VersionControlSystem::class.java)!!
 
         /**
-         * The (prioritized) list of all available Version Control Systems in the classpath.
+         * The set of all available [Version Control Systems][VersionControlSystem] in the classpath, sorted by
+         * priority.
          */
-        val ALL by lazy { LOADER.iterator().asSequence().toList().sortedByDescending { it.priority } }
+        val ALL: Set<VersionControlSystem> by lazy {
+            LOADER.iterator().asSequence().toSortedSet(compareByDescending { it.priority })
+        }
 
         /**
          * Return the applicable VCS for the given [vcsType], or null if none is applicable.
@@ -64,11 +68,20 @@ abstract class VersionControlSystem {
          */
         @Synchronized
         fun forUrl(vcsUrl: String) =
+            // Do not use getOrPut() here as it cannot handle null values, also see
+            // https://youtrack.jetbrains.com/issue/KT-21392.
             if (vcsUrl in urlToVcsMap) {
                 urlToVcsMap[vcsUrl]
             } else {
-                ALL.find {
-                    it.isAvailable() && it.isApplicableUrl(vcsUrl)
+                // First try to determine the VCS type statically...
+                when (val type = VcsHost.parseUrl(vcsUrl).type) {
+                    VcsType.UNKNOWN -> {
+                        // ...then eventually try to determine the type also dynamically.
+                        ALL.find {
+                            it.isAvailable() && it.isApplicableUrl(vcsUrl)
+                        }
+                    }
+                    else -> forType(type)
                 }.also {
                     urlToVcsMap[vcsUrl] = it
                 }
@@ -133,10 +146,13 @@ abstract class VersionControlSystem {
         }
 
         /**
-         * Return glob patterns matching all potential license or patent files.
+         * Return glob patterns for files that should be checkout out in addition to explicit sparse checkout paths.
          */
-        internal fun getLicenseFileGlobPatterns(): List<String> =
-            LicenseFilenamePatterns.getInstance().allLicenseFilenames.generateCapitalizationVariants().map { "**/$it" }
+        internal fun getSparseCheckoutGlobPatterns(): List<String> {
+            val globPatterns = mutableListOf("*$ORT_REPO_CONFIG_FILENAME")
+            val licensePatterns = LicenseFilenamePatterns.getInstance()
+            return licensePatterns.allLicenseFilenames.generateCapitalizationVariants().mapTo(globPatterns) { "**/$it" }
+        }
 
         private fun Collection<String>.generateCapitalizationVariants() =
             flatMap { listOf(it, it.uppercase(), it.uppercaseFirstChar()) }
@@ -185,7 +201,7 @@ abstract class VersionControlSystem {
     fun isApplicableUrl(vcsUrl: String): Boolean {
         if (vcsUrl.isBlank() || vcsUrl.endsWith(".html")) return false
 
-        return VcsHost.toVcsInfo(vcsUrl).type == type || isApplicableUrlInternal(vcsUrl)
+        return VcsHost.parseUrl(vcsUrl).type == type || isApplicableUrlInternal(vcsUrl)
     }
 
     /**

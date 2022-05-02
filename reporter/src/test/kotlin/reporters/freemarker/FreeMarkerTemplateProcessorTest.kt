@@ -21,8 +21,11 @@ package org.ossreviewtoolkit.reporter.reporters.freemarker
 
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.inspectors.forAll
+import io.kotest.matchers.collections.containExactly
+import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.haveSize
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.maps.beEmpty
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
@@ -30,15 +33,26 @@ import io.mockk.every
 import io.mockk.mockk
 
 import java.time.Instant
+import java.util.SortedMap
 
 import org.ossreviewtoolkit.model.AccessStatistics
+import org.ossreviewtoolkit.model.AdvisorCapability
+import org.ossreviewtoolkit.model.AdvisorDetails
+import org.ossreviewtoolkit.model.AdvisorRecord
+import org.ossreviewtoolkit.model.AdvisorResult
+import org.ossreviewtoolkit.model.AdvisorRun
+import org.ossreviewtoolkit.model.AdvisorSummary
 import org.ossreviewtoolkit.model.AnalyzerResult
 import org.ossreviewtoolkit.model.AnalyzerRun
 import org.ossreviewtoolkit.model.CopyrightFinding
+import org.ossreviewtoolkit.model.CuratedPackage
+import org.ossreviewtoolkit.model.Defect
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.LicenseSource
+import org.ossreviewtoolkit.model.OrtIssue
 import org.ossreviewtoolkit.model.OrtResult
+import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.Repository
 import org.ossreviewtoolkit.model.RepositoryProvenance
@@ -47,9 +61,12 @@ import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.ScannerDetails
 import org.ossreviewtoolkit.model.ScannerRun
+import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
+import org.ossreviewtoolkit.model.Vulnerability
+import org.ossreviewtoolkit.model.config.AdvisorConfiguration
 import org.ossreviewtoolkit.model.config.LicenseChoices
 import org.ossreviewtoolkit.model.config.PackageLicenseChoice
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
@@ -59,6 +76,7 @@ import org.ossreviewtoolkit.model.licenses.ResolvedLicense
 import org.ossreviewtoolkit.model.licenses.ResolvedLicenseInfo
 import org.ossreviewtoolkit.model.licenses.ResolvedOriginalExpression
 import org.ossreviewtoolkit.reporter.ReporterInput
+import org.ossreviewtoolkit.utils.common.enumSetOf
 import org.ossreviewtoolkit.utils.core.Environment
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
 import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
@@ -90,8 +108,7 @@ private fun scanResults(
 
 private val PROJECT_VCS_INFO = VcsInfo(
     type = VcsType.GIT_REPO,
-    url = "ssh://git@host/manifests/repo",
-    path = "path/to/manifest.xml",
+    url = "ssh://git@host/manifests/repo?manifest=path/to/manifest.xml",
     revision = "deadbeaf44444444333333332222222211111111"
 )
 private val NESTED_VCS_INFO = VcsInfo(
@@ -100,6 +117,10 @@ private val NESTED_VCS_INFO = VcsInfo(
     path = "",
     revision = "0000000000000000000000000000000000000000"
 )
+
+private val idRootProject = Identifier("NPM:@ort:project-in-root-dir:1.0")
+private val idSubProject = Identifier("SpdxDocumentFile:@ort:project-in-sub-dir:1.0")
+private val idNestedProject = Identifier("SpdxDocumentFile:@ort:project-in-nested-vcs:1.0")
 
 private val ORT_RESULT = OrtResult(
     repository = Repository(
@@ -113,17 +134,17 @@ private val ORT_RESULT = OrtResult(
         result = AnalyzerResult.EMPTY.copy(
             projects = sortedSetOf(
                 Project.EMPTY.copy(
-                    id = Identifier("NPM:@ort:project-in-root-dir:1.0"),
+                    id = idRootProject,
                     definitionFilePath = "package.json",
                     vcsProcessed = PROJECT_VCS_INFO
                 ),
                 Project.EMPTY.copy(
-                    id = Identifier("SpdxDocumentFile:@ort:project-in-sub-dir:1.0"),
+                    id = idSubProject,
                     definitionFilePath = "sub-dir/project.spdx.yml",
                     vcsProcessed = PROJECT_VCS_INFO
                 ),
                 Project.EMPTY.copy(
-                    id = Identifier("SpdxDocumentFile:@ort:project-in-nested-vcs:1.0"),
+                    id = idNestedProject,
                     definitionFilePath = "nested-vcs-dir/project.spdx.yml",
                     vcsProcessed = NESTED_VCS_INFO
                 )
@@ -135,7 +156,7 @@ private val ORT_RESULT = OrtResult(
         config = ScannerConfiguration(),
         results = ScanRecord(
             scanResults = sortedMapOf(
-                Identifier("NPM:@ort:project-in-root-dir:1.0") to scanResults(
+                idRootProject to scanResults(
                     vcsInfo = PROJECT_VCS_INFO,
                     findingsPaths = listOf(
                         "src/main.js",
@@ -143,13 +164,13 @@ private val ORT_RESULT = OrtResult(
                         "nested-vcs-dir/src/main.cpp"
                     )
                 ),
-                Identifier("SpdxDocumentFile:@ort:project-in-sub-dir:1.0") to scanResults(
+                idSubProject to scanResults(
                     vcsInfo = PROJECT_VCS_INFO,
                     findingsPaths = listOf(
                         "sub-dir/src/main.cpp"
                     )
                 ),
-                Identifier("SpdxDocumentFile:@ort:project-in-nested-vcs:1.0") to scanResults(
+                idNestedProject to scanResults(
                     vcsInfo = NESTED_VCS_INFO,
                     findingsPaths = listOf(
                         "src/main.cpp"
@@ -161,21 +182,23 @@ private val ORT_RESULT = OrtResult(
     )
 )
 
+private val ADVISOR_DETAILS = AdvisorDetails("testAdvisor", enumSetOf(AdvisorCapability.VULNERABILITIES))
+
 /**
  * Prepare the given [mock for a LicenseInfoResolver][resolverMock] to return a [ResolvedLicenseInfo] for the given
  * [id]. The [ResolvedLicenseInfo] contains a single [ResolvedLicense], which is constructed based on the provided
- * [license] and [originalExpressions] map.
+ * [license] and [originalExpression].
  */
-private fun expectResolveLicenseInfo(
+private fun expectResolvedLicenseInfo(
     resolverMock: LicenseInfoResolver,
     id: Identifier,
     license: String,
-    originalExpressions: Set<ResolvedOriginalExpression> = emptySet()
+    originalExpression: ResolvedOriginalExpression
 ) {
     val resolvedLicense = ResolvedLicense(
         license = license.toSpdx() as SpdxSingleLicenseExpression,
         originalDeclaredLicenses = emptySet(),
-        originalExpressions = originalExpressions,
+        originalExpressions = setOf(originalExpression),
         locations = emptySet()
     )
 
@@ -185,19 +208,19 @@ private fun expectResolveLicenseInfo(
 }
 
 /**
- * Like [expectResolveLicenseInfo] with multiple licenses that have same originalExpression.
+ * Like [expectResolvedLicenseInfo] with multiple licenses that have same originalExpression.
  */
-private fun expectResolveLicenseInfo(
+private fun expectResolvedLicenseInfo(
     resolverMock: LicenseInfoResolver,
     id: Identifier,
     licenses: List<String>,
-    originalExpressions: Set<ResolvedOriginalExpression> = emptySet()
+    originalExpression: ResolvedOriginalExpression
 ) {
     val resolvedLicenses = licenses.map { license ->
         ResolvedLicense(
             license = license.toSpdx() as SpdxSingleLicenseExpression,
             originalDeclaredLicenses = emptySet(),
-            originalExpressions = originalExpressions,
+            originalExpressions = setOf(originalExpression),
             locations = emptySet()
         )
     }
@@ -213,11 +236,43 @@ private fun expectResolveLicenseInfo(
  */
 private fun testProjects() = ORT_RESULT.getProjects().toList()
 
+/**
+ * Create an [AdvisorRun] with the given [results].
+ */
+private fun advisorRun(results: SortedMap<Identifier, List<AdvisorResult>>): AdvisorRun =
+    AdvisorRun(
+        startTime = Instant.now(),
+        endTime = Instant.now(),
+        environment = Environment(),
+        config = AdvisorConfiguration(),
+        results = AdvisorRecord(results)
+    )
+
+/**
+ * Create an [AdvisorResult] with the given [details], [issues], and [vulnerabilities].
+ */
+private fun advisorResult(
+    details: AdvisorDetails = ADVISOR_DETAILS,
+    issues: List<OrtIssue> = emptyList(),
+    vulnerabilities: List<Vulnerability> = emptyList(),
+    defects: List<Defect> = emptyList()
+): AdvisorResult =
+    AdvisorResult(
+        advisor = details,
+        summary = AdvisorSummary(
+            startTime = Instant.now(),
+            endTime = Instant.now(),
+            issues = issues
+        ),
+        vulnerabilities = vulnerabilities,
+        defects = defects
+    )
+
 class FreeMarkerTemplateProcessorTest : WordSpec({
     "deduplicateProjectScanResults" should {
         val targetProjects = setOf(
-            Identifier("SpdxDocumentFile:@ort:project-in-sub-dir:1.0"),
-            Identifier("SpdxDocumentFile:@ort:project-in-nested-vcs:1.0")
+            idSubProject,
+            idNestedProject
         )
 
         val ortResult = ORT_RESULT.deduplicateProjectScanResults(targetProjects)
@@ -229,7 +284,7 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
         }
 
         "remove the findings of all target projects from the root project" {
-            val scanResult = ortResult.getScanResultsForId(Identifier("NPM:@ort:project-in-root-dir:1.0")).single()
+            val scanResult = ortResult.getScanResultsForId(idRootProject).single()
 
             with(scanResult.summary) {
                 copyrightFindings.map { it.location.path } shouldContainExactlyInAnyOrder listOf(
@@ -248,23 +303,23 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
             val projects = testProjects()
             val resolver = mockk<LicenseInfoResolver>()
 
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[0].id,
                 "MIT",
-                setOf(ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED)
             )
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[1].id,
                 "MIT",
-                setOf(ResolvedOriginalExpression("GPL-2.0-only OR MIT".toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression("GPL-2.0-only OR MIT".toSpdx(), LicenseSource.DECLARED)
             )
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[2].id,
                 SpdxConstants.NOASSERTION,
-                setOf(ResolvedOriginalExpression(SpdxConstants.NOASSERTION.toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression(SpdxConstants.NOASSERTION.toSpdx(), LicenseSource.DECLARED)
             )
 
             val input = ReporterInput(ORT_RESULT, licenseInfoResolver = resolver)
@@ -290,11 +345,11 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
             val projects = testProjects()
             val resolver = mockk<LicenseInfoResolver>()
 
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[0].id,
                 "MIT",
-                setOf(ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED)
             )
 
             val mockResult = mockk<OrtResult>()
@@ -317,17 +372,17 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
             val projects = testProjects()
             val resolver = mockk<LicenseInfoResolver>()
 
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[0].id,
                 "MIT",
-                setOf(ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression("MIT".toSpdx(), LicenseSource.DECLARED)
             )
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[1].id,
                 SpdxConstants.NOASSERTION,
-                setOf(ResolvedOriginalExpression(SpdxConstants.NOASSERTION.toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression(SpdxConstants.NOASSERTION.toSpdx(), LicenseSource.DECLARED)
             )
 
             val input = ReporterInput(ORT_RESULT, licenseInfoResolver = resolver)
@@ -345,11 +400,11 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
             val projects = testProjects()
             val resolver = mockk<LicenseInfoResolver>()
 
-            expectResolveLicenseInfo(
+            expectResolvedLicenseInfo(
                 resolver,
                 projects[1].id,
                 listOf("MIT", "GPL-2.0-only", "Apache-2.0"),
-                setOf(ResolvedOriginalExpression("GPL-2.0-only OR MIT OR Apache-2.0".toSpdx(), LicenseSource.DECLARED))
+                ResolvedOriginalExpression("GPL-2.0-only OR MIT OR Apache-2.0".toSpdx(), LicenseSource.DECLARED)
             )
 
             val ortResult = ORT_RESULT.copy(
@@ -382,6 +437,222 @@ class FreeMarkerTemplateProcessorTest : WordSpec({
                     "GPL-2.0-only OR MIT OR Apache-2.0"
                 )
             }
+        }
+    }
+
+    "hasAdvisorIssues" should {
+        "return false if there is no advisor result" {
+            val input = ReporterInput(ORT_RESULT)
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.hasAdvisorIssues(AdvisorCapability.VULNERABILITIES, Severity.ERROR) shouldBe false
+        }
+
+        "return true if there are issues for an advisor with the provided capability" {
+            val issue = OrtIssue(source = ADVISOR_DETAILS.name, message = "An error occurred")
+            val advisorResult = advisorResult(issues = listOf(issue))
+
+            val advisorRun = advisorRun(sortedMapOf(idSubProject to listOf(advisorResult)))
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.hasAdvisorIssues(AdvisorCapability.VULNERABILITIES, Severity.WARNING) shouldBe true
+        }
+
+        "ignore advisor results with other capabilities" {
+            val vulnerability = mockk<Vulnerability>()
+            val advisorResult1 = advisorResult(vulnerabilities = listOf(vulnerability))
+
+            val details2 = AdvisorDetails("anotherAdvisor", enumSetOf(AdvisorCapability.DEFECTS))
+            val issue = OrtIssue(source = details2.name, message = "Error when loading defects")
+            val advisorResult2 = advisorResult(details = details2, issues = listOf(issue))
+
+            val advisorRun = advisorRun(
+                sortedMapOf(idSubProject to listOf(advisorResult1), idNestedProject to listOf(advisorResult2))
+            )
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.hasAdvisorIssues(AdvisorCapability.VULNERABILITIES, Severity.ERROR) shouldBe false
+        }
+
+        "ignore issues with a lower severity" {
+            val issue =
+                OrtIssue(source = ADVISOR_DETAILS.name, message = "A warning occurred", severity = Severity.WARNING)
+            val advisorResult = advisorResult(issues = listOf(issue))
+
+            val advisorRun = advisorRun(sortedMapOf(idSubProject to listOf(advisorResult)))
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.hasAdvisorIssues(AdvisorCapability.VULNERABILITIES, Severity.ERROR) shouldBe false
+        }
+    }
+
+    "advisorResultsWithIssues" should {
+        "return the correct results" {
+            val issue = OrtIssue(source = ADVISOR_DETAILS.name, message = "An error occurred")
+            val advisorResult = advisorResult(issues = listOf(issue))
+
+            val advisorRun = advisorRun(
+                sortedMapOf(
+                    idSubProject to listOf(advisorResult),
+                    idRootProject to listOf(advisorResult())
+                )
+            )
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithIssues(AdvisorCapability.VULNERABILITIES, Severity.WARNING)
+
+            results.keys should containExactly(idSubProject)
+            results.getValue(idSubProject) should containExactly(advisorResult)
+        }
+
+        "ignore advisor results with other capabilities" {
+            val details2 = AdvisorDetails("anotherAdvisor", enumSetOf(AdvisorCapability.DEFECTS))
+            val issue = OrtIssue(source = details2.name, message = "Error when loading defects")
+
+            val vulnerability = mockk<Vulnerability>()
+            val advisorResult1 = advisorResult(vulnerabilities = listOf(vulnerability), issues = listOf(issue))
+            val advisorResult2 = advisorResult(details = details2, issues = listOf(issue))
+
+            val advisorRun = advisorRun(
+                sortedMapOf(idSubProject to listOf(advisorResult1), idNestedProject to listOf(advisorResult2))
+            )
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithIssues(AdvisorCapability.DEFECTS, Severity.ERROR)
+
+            results.keys should containExactly(idNestedProject)
+            results.getValue(idNestedProject) should containExactly(advisorResult2)
+        }
+
+        "ignore issues with a lower severity" {
+            val issue =
+                OrtIssue(source = ADVISOR_DETAILS.name, message = "A warning occurred", severity = Severity.WARNING)
+            val advisorResult = advisorResult(issues = listOf(issue))
+
+            val advisorRun = advisorRun(sortedMapOf(idSubProject to listOf(advisorResult)))
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.advisorResultsWithIssues(AdvisorCapability.VULNERABILITIES, Severity.ERROR) should beEmpty()
+        }
+    }
+
+    "advisorResultsWithVulnerabilities" should {
+        "return the correct results" {
+            val resultWithVulnerabilities1 = advisorResult(vulnerabilities = listOf(mockk()))
+            val resultWithVulnerabilities2 = advisorResult(
+                details = AdvisorDetails("otherVulnerabilityProvider"),
+                vulnerabilities = listOf(mockk())
+            )
+            val otherResult = advisorResult()
+
+            val advisorRun = advisorRun(
+                sortedMapOf(
+                    idRootProject to emptyList(),
+                    idNestedProject to listOf(resultWithVulnerabilities1, otherResult),
+                    idSubProject to listOf(resultWithVulnerabilities2)
+                )
+            )
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithVulnerabilities()
+
+            results.keys should containExactlyInAnyOrder(idNestedProject, idSubProject)
+            results.getValue(idNestedProject) should containExactly(resultWithVulnerabilities1)
+            results.getValue(idSubProject) should containExactly(resultWithVulnerabilities2)
+        }
+
+        "return an empty map if there is no advisor result" {
+            val input = ReporterInput(ORT_RESULT)
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithVulnerabilities()
+
+            results should beEmpty()
+        }
+    }
+
+    "advisorResultsWithDefects" should {
+        "return the correct results" {
+            val resultWithDefects1 = advisorResult(defects = listOf(mockk()))
+            val resultWithDefects2 = advisorResult(
+                details = AdvisorDetails("otherDefectProvider"),
+                defects = listOf(mockk())
+            )
+            val otherResult = advisorResult()
+
+            val advisorRun = advisorRun(
+                sortedMapOf(
+                    idRootProject to emptyList(),
+                    idNestedProject to listOf(resultWithDefects1, otherResult),
+                    idSubProject to listOf(resultWithDefects2)
+                )
+            )
+            val ortResult = ORT_RESULT.copy(advisor = advisorRun)
+            val input = ReporterInput(ortResult)
+
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithDefects()
+
+            results.keys should containExactlyInAnyOrder(idNestedProject, idSubProject)
+            results.getValue(idNestedProject) should containExactly(resultWithDefects1)
+            results.getValue(idSubProject) should containExactly(resultWithDefects2)
+        }
+
+        "return an empty map if there is no advisor result" {
+            val input = ReporterInput(ORT_RESULT)
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            val results = helper.advisorResultsWithDefects()
+
+            results should beEmpty()
+        }
+    }
+
+    "getPackage" should {
+        "return the correct package for the given ID" {
+            val id = Identifier.EMPTY.copy(name = "test-package", version = "1.0.1")
+            val pkg = Package.EMPTY.copy(
+                id = id,
+                cpe = "cpe:2.3:a:test:${id.name}:${id.version}:-:-:-:-:-:-:-"
+            )
+            val analyzerResult = ORT_RESULT.analyzer!!.result.copy(packages = sortedSetOf(CuratedPackage(pkg)))
+            val analyzerRun = ORT_RESULT.analyzer!!.copy(result = analyzerResult)
+
+            val input = ReporterInput(ORT_RESULT.copy(analyzer = analyzerRun))
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.getPackage(id) shouldBe pkg
+        }
+
+        "return the empty package for an unknown ID" {
+            val id = Identifier.EMPTY.copy(name = "unknown-package")
+
+            val input = ReporterInput(ORT_RESULT)
+            val helper = FreemarkerTemplateProcessor.TemplateHelper(input)
+
+            helper.getPackage(id) shouldBe Package.EMPTY
         }
     }
 })

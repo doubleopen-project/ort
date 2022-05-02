@@ -18,10 +18,10 @@
  */
 
 import com.github.tomakehurst.wiremock.WireMockServer
-import com.github.tomakehurst.wiremock.client.WireMock
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 
@@ -30,7 +30,6 @@ import org.ossreviewtoolkit.clients.fossid.FossIdServiceWithVersion
 import org.ossreviewtoolkit.clients.fossid.VersionedFossIdService2021dot2
 import org.ossreviewtoolkit.clients.fossid.checkResponse
 import org.ossreviewtoolkit.clients.fossid.model.status.ScanStatus
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 private const val PROJECT_CODE = "semver4j"
 private const val SCAN_CODE_2021_2 = "${PROJECT_CODE}_20201203_090342_21.2"
@@ -39,7 +38,7 @@ private const val SCAN_CODE_2021_2 = "${PROJECT_CODE}_20201203_090342_21.2"
  * This client test tests the calls that have been changed for FossID 2021.2.
  */
 class FossId2021dot2Test : StringSpec({
-    val wiremock = WireMockServer(
+    val server = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
             .usingFilesUnderDirectory("src/test/assets/2021.2")
@@ -47,17 +46,16 @@ class FossId2021dot2Test : StringSpec({
     lateinit var service: FossIdServiceWithVersion
 
     beforeSpec {
-        wiremock.start()
-        WireMock.configureFor(wiremock.port())
-        service = FossIdServiceWithVersion.instance(FossIdRestService.create("http://localhost:${wiremock.port()}"))
+        server.start()
+        service = FossIdServiceWithVersion.instance(FossIdRestService.create("http://localhost:${server.port()}"))
     }
 
     afterSpec {
-        wiremock.stop()
+        server.stop()
     }
 
     beforeTest {
-        wiremock.resetAll()
+        server.resetAll()
     }
 
     "Version can be parsed of login page (2021.2)" {
@@ -68,12 +66,10 @@ class FossId2021dot2Test : StringSpec({
     "Scan status can be queried (2021.2)" {
         // because the service caches the version, we must recreate it
         service = FossIdServiceWithVersion.instance(service)
-        service.checkScanStatus("", "", SCAN_CODE_2021_2) shouldNotBeNull {
+        service.checkScanStatus("", "", SCAN_CODE_2021_2).shouldNotBeNull().run {
             checkResponse("get scan status")
 
-            data shouldNotBeNull {
-                status shouldBe ScanStatus.FINISHED
-            }
+            data.shouldNotBeNull().status shouldBe ScanStatus.FINISHED
         }
     }
 })

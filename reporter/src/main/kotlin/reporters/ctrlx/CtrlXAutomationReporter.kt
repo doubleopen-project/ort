@@ -25,10 +25,18 @@ import org.ossreviewtoolkit.model.licenses.LicenseView
 import org.ossreviewtoolkit.model.writeValue
 import org.ossreviewtoolkit.reporter.Reporter
 import org.ossreviewtoolkit.reporter.ReporterInput
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 class CtrlXAutomationReporter : Reporter {
     companion object {
         const val REPORT_FILENAME = "fossinfo.json"
+
+        private val LICENSE_NOASSERTION = License(
+            name = SpdxConstants.NOASSERTION,
+            spdx = SpdxConstants.NOASSERTION.toSpdx(),
+            text = ""
+        )
     }
 
     override val reporterName = "CtrlXAutomation"
@@ -62,12 +70,15 @@ class CtrlXAutomationReporter : Reporter {
                 License(name = id, spdx = it, text = text.orEmpty())
             }
 
+            // The specification requires at least one license.
+            val componentLicenses = licenses.takeUnless { it.isNullOrEmpty() } ?: listOf(LICENSE_NOASSERTION)
+
             Component(
                 name = qualifiedName,
                 version = pkg.id.version,
                 homepage = pkg.homepageUrl.takeUnless { it.isEmpty() },
                 copyright = copyrights?.let { CopyrightInformation(it) },
-                licenses = licenses.orEmpty(),
+                licenses = componentLicenses,
                 usage = if (pkg.isModified) Usage.Modified else Usage.AsIs
                 // TODO: Map the PackageLinkage to an IntegrationMechanism.
             )

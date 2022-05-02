@@ -26,6 +26,7 @@ import io.kotest.extensions.system.withEnvironment
 import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.maps.containExactly as containExactlyEntries
 import io.kotest.matchers.nulls.beNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
@@ -36,7 +37,6 @@ import java.io.File
 import java.lang.IllegalArgumentException
 
 import org.ossreviewtoolkit.model.SourceCodeOrigin
-import org.ossreviewtoolkit.utils.test.containExactly as containExactlyEntries
 import org.ossreviewtoolkit.utils.test.createTestTempFile
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
@@ -47,7 +47,6 @@ class OrtConfigurationTest : WordSpec({
             val ortConfig = OrtConfiguration.load(file = refConfig)
 
             with(ortConfig.analyzer) {
-                ignoreToolVersions shouldBe true
                 allowDynamicVersions shouldBe true
 
                 sw360Configuration shouldNotBeNull {
@@ -151,6 +150,26 @@ class OrtConfigurationTest : WordSpec({
                 storageWriters shouldContainExactly listOf("postgres")
 
                 ignorePatterns shouldContainExactly listOf("**/META-INF/DEPENDENCIES")
+
+                provenanceStorage shouldNotBeNull {
+                    fileStorage shouldNotBeNull {
+                        httpFileStorage should beNull()
+                        localFileStorage shouldNotBeNull {
+                            directory shouldBe File("~/.ort/scanner/provenance")
+                        }
+                    }
+
+                    postgresStorage shouldNotBeNull {
+                        url shouldBe "jdbc:postgresql://your-postgresql-server:5444/your-database"
+                        schema shouldBe "public"
+                        username shouldBe "username"
+                        password shouldBe "password"
+                        sslmode shouldBe "required"
+                        sslcert shouldBe "/defaultdir/postgresql.crt"
+                        sslkey shouldBe "/defaultdir/postgresql.pk8"
+                        sslrootcert shouldBe "/defaultdir/root.crt"
+                    }
+                }
             }
 
             with(ortConfig.notifier) {
@@ -162,9 +181,7 @@ class OrtConfigurationTest : WordSpec({
                     useSsl shouldBe true
                     fromAddress shouldBe "no-reply@oss-review-toolkit.org"
                 }
-            }
 
-            with(ortConfig.notifier) {
                 jira shouldNotBeNull {
                     host shouldBe "localhost"
                     username shouldBe "user"
@@ -177,6 +194,9 @@ class OrtConfigurationTest : WordSpec({
                 patentFilenames shouldContainExactly listOf("patents")
                 rootLicenseFilenames shouldContainExactly listOf("readme*")
             }
+
+            ortConfig.enableRepositoryPackageCurations shouldBe true
+            ortConfig.enableRepositoryPackageConfigurations shouldBe true
         }
 
         "correctly prioritize the sources" {

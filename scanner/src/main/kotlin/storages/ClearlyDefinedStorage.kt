@@ -29,16 +29,15 @@ import kotlinx.coroutines.runBlocking
 
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService
 import org.ossreviewtoolkit.clients.clearlydefined.ComponentType
+import org.ossreviewtoolkit.clients.clearlydefined.Coordinates
+import org.ossreviewtoolkit.clients.clearlydefined.SourceLocation
 import org.ossreviewtoolkit.model.ArtifactProvenance
-import org.ossreviewtoolkit.model.Failure
 import org.ossreviewtoolkit.model.Hash
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.RepositoryProvenance
-import org.ossreviewtoolkit.model.Result
 import org.ossreviewtoolkit.model.ScanResult
-import org.ossreviewtoolkit.model.Success
 import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsInfoCurationData
@@ -49,6 +48,7 @@ import org.ossreviewtoolkit.model.utils.toClearlyDefinedCoordinates
 import org.ossreviewtoolkit.model.utils.toClearlyDefinedSourceLocation
 import org.ossreviewtoolkit.scanner.ScanResultsStorage
 import org.ossreviewtoolkit.scanner.ScannerCriteria
+import org.ossreviewtoolkit.scanner.experimental.ScanStorageException
 import org.ossreviewtoolkit.scanner.scanners.scancode.generateScannerDetails
 import org.ossreviewtoolkit.scanner.scanners.scancode.generateSummary
 import org.ossreviewtoolkit.utils.common.collectMessagesAsString
@@ -62,10 +62,9 @@ import retrofit2.HttpException
 private const val TOOL_SCAN_CODE = "scancode"
 
 /**
- * Convert a [ClearlyDefinedService.SourceLocation] to a [ClearlyDefinedService.Coordinates] object.
+ * Convert a [SourceLocation] to a [Coordinates] object.
  */
-private fun ClearlyDefinedService.SourceLocation.toCoordinates(): ClearlyDefinedService.Coordinates =
-    ClearlyDefinedService.Coordinates(type, provider, namespace, name, revision)
+private fun SourceLocation.toCoordinates(): Coordinates = Coordinates(type, provider, namespace, name, revision)
 
 /**
  * Convert a [VcsInfo] to a [VcsInfoCurationData] object.
@@ -81,7 +80,7 @@ private fun packageCoordinates(
     id: Identifier,
     vcs: VcsInfo?,
     sourceArtifact: RemoteArtifact?
-): ClearlyDefinedService.Coordinates {
+): Coordinates {
     val sourceLocation = id.toClearlyDefinedSourceLocation(vcs?.toVcsInfoCurationData(), sourceArtifact)
     return sourceLocation?.toCoordinates() ?: id.toClearlyDefinedCoordinates()
         ?: throw IllegalArgumentException("Unable to create ClearlyDefined coordinates for '${id.toCoordinates()}'.")
@@ -91,15 +90,10 @@ private fun packageCoordinates(
  * Given a list of [tools], return the version of ScanCode that was used to scan the package with the given
  * [coordinates], or return null if no such tool entry is found.
  */
-private fun findScanCodeVersion(tools: List<String>, coordinates: ClearlyDefinedService.Coordinates): String? {
+private fun findScanCodeVersion(tools: List<String>, coordinates: Coordinates): String? {
     val toolUrl = "$coordinates/$TOOL_SCAN_CODE/"
     return tools.find { it.startsWith(toolUrl) }?.substring(toolUrl.length)
 }
-
-/**
- * A [Success] result with an empty list of [ScanResult]s.
- */
-private val EMPTY_RESULT = Success<List<ScanResult>>(emptyList())
 
 /**
  * A storage implementation that tries to download ScanCode results from ClearlyDefined.
@@ -123,7 +117,7 @@ class ClearlyDefinedStorage(
         readPackageFromClearlyDefined(pkg.id, pkg.vcs, pkg.sourceArtifact.takeIf { it.url.isNotEmpty() })
 
     override fun addInternal(id: Identifier, scanResult: ScanResult): Result<Unit> =
-        Failure("Adding scan results directly to ClearlyDefined is not supported.")
+        Result.failure(ScanStorageException("Adding scan results directly to ClearlyDefined is not supported."))
 
     /**
      * Try to obtain a [ScanResult] produced by ScanCode from ClearlyDefined for the package with the given [id].
@@ -150,10 +144,7 @@ class ClearlyDefinedStorage(
      * using the given [coordinates] for looking up the data. These may not necessarily be equivalent to the
      * identifier, as we try to lookup source code results if a GitHub repository is known.
      */
-    private suspend fun readFromClearlyDefined(
-        id: Identifier,
-        coordinates: ClearlyDefinedService.Coordinates
-    ): Result<List<ScanResult>> {
+    private suspend fun readFromClearlyDefined(id: Identifier, coordinates: Coordinates): Result<List<ScanResult>> {
         val startTime = Instant.now()
         log.info { "Looking up results for '${id.toCoordinates()}'." }
 
@@ -192,7 +183,7 @@ class ClearlyDefinedStorage(
 
         log.error { message }
 
-        return Failure(message)
+        return Result.failure(ScanStorageException(message))
     }
 
     /**
@@ -200,7 +191,7 @@ class ClearlyDefinedStorage(
      * The results have been produced by ScanCode in the given [version]; use the [startTime] for metadata.
      */
     private suspend fun loadScanCodeResults(
-        coordinates: ClearlyDefinedService.Coordinates,
+        coordinates: Coordinates,
         version: String,
         startTime: Instant
     ): Result<List<ScanResult>> {
@@ -243,7 +234,7 @@ class ClearlyDefinedStorage(
                 val summary = generateSummary(startTime, Instant.now(), "", result)
                 val details = generateScannerDetails(result)
 
-                Success(listOf(ScanResult(provenance, details, summary)))
+                Result.success(listOf(ScanResult(provenance, details, summary)))
             } ?: EMPTY_RESULT
         }
     }

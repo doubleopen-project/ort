@@ -68,12 +68,12 @@ class ExcludesTest : WordSpec() {
 
     private lateinit var ortResult: OrtResult
 
-    override fun beforeTest(testCase: TestCase) {
+    override suspend fun beforeEach(testCase: TestCase) {
         ortResult = OrtResult(
             repository = Repository.EMPTY,
             analyzer = AnalyzerRun(
                 environment = Environment(),
-                config = AnalyzerConfiguration(ignoreToolVersions = false, allowDynamicVersions = false),
+                config = AnalyzerConfiguration(allowDynamicVersions = false),
                 result = AnalyzerResult.EMPTY
             )
         )
