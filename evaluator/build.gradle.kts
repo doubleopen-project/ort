@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.bundles.kotlinxSerialization)
 
     testImplementation(libs.mockk)
+    implementation(kotlin("script-runtime"))
 }
 
 tasks.register<Download>("updateOsadlMatrix") {
