@@ -167,13 +167,13 @@ pipeline {
         choice(
             name: 'PROJECT_SCANNER',
             description: 'The scanner to use for project source code.',
-            choices: ['ScanCode', 'Askalono', 'BoyterLc', 'Licensee', 'ScanOSS', '<NONE>']
+            choices: ['ScanCode', 'Askalono', 'BoyterLc', 'Licensee', 'ScanOSS', 'DOS', '<NONE>']
         )
 
         choice(
             name: 'PACKAGE_SCANNER',
             description: 'The scanner to use for package source code.',
-            choices: ['ScanCode', 'Askalono', 'BoyterLc', 'Licensee', 'ScanOSS', '<NONE>']
+            choices: ['ScanCode', 'Askalono', 'BoyterLc', 'Licensee', 'ScanOSS', 'DOS', '<NONE>']
         )
 
         booleanParam(
@@ -195,6 +195,12 @@ pipeline {
         string(
             name: 'VULNERABLE_CODE_API_KEY',
             description: 'Optional API key to enable VulnerableCode (see https://public.vulnerablecode.io/account/request_api_key/).',
+            defaultValue: ''
+        )
+
+        string(
+            name: 'DOS_API_KEY',
+            description: 'Optional API key to enable DOS (see https://github.com/doubleopen-project/dos/).',
             defaultValue: ''
         )
 
@@ -254,6 +260,7 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -282,6 +289,7 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 PROJECT_DIR = "${env.HOME}/project"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -329,6 +337,7 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 ORT_DATA_DIR = "${env.HOME}/.ort"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -390,6 +399,7 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 PROJECT_DIR = "${env.HOME}/project"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -478,6 +488,7 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -505,6 +516,10 @@ pipeline {
                             # Take both storages into use.
                             ORT_OPTIONS="$ORT_OPTIONS -P ort.scanner.storageReaders=localFiles,clearlyDefined \
                                 -P ort.scanner.storageWriters=localFiles"
+                        fi
+
+                        if [ -n "$DOS_API_KEY" ]; then
+                            $SERVER_TOKEN=$DOS_API_KEY
                         fi
 
                         if [ "$STACKTRACE" = "true" ]; then
@@ -599,6 +614,7 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -666,6 +682,7 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -683,6 +700,10 @@ pipeline {
 
                         if [ "$STACKTRACE" = "true" ]; then
                             ORT_OPTIONS="$ORT_OPTIONS --stacktrace"
+                        fi
+
+                        if [ -n "$DOS_API_KEY" ]; then
+                            $SERVER_TOKEN=$DOS_API_KEY
                         fi
 
                         /opt/ort/bin/ort $ORT_OPTIONS evaluate -i out/results/current-result.yml --rules-resource /rules/osadl.rules.kts -o out/results/evaluator
@@ -726,6 +747,7 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
+                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
