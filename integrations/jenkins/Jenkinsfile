@@ -518,10 +518,6 @@ pipeline {
                                 -P ort.scanner.storageWriters=localFiles"
                         fi
 
-                        if [ -n "$DOS_API_KEY" ]; then
-                            $SERVER_TOKEN=$DOS_API_KEY
-                        fi
-
                         if [ "$STACKTRACE" = "true" ]; then
                             ORT_OPTIONS="$ORT_OPTIONS --stacktrace"
                         fi
@@ -700,10 +696,6 @@ pipeline {
 
                         if [ "$STACKTRACE" = "true" ]; then
                             ORT_OPTIONS="$ORT_OPTIONS --stacktrace"
-                        fi
-
-                        if [ -n "$DOS_API_KEY" ]; then
-                            $SERVER_TOKEN=$DOS_API_KEY
                         fi
 
                         /opt/ort/bin/ort $ORT_OPTIONS evaluate -i out/results/current-result.yml --rules-resource /rules/osadl.rules.kts -o out/results/evaluator
