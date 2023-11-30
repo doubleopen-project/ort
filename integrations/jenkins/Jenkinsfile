@@ -198,12 +198,6 @@ pipeline {
             defaultValue: ''
         )
 
-        string(
-            name: 'DOS_API_KEY',
-            description: 'Optional API key to enable DOS (see https://github.com/doubleopen-project/dos/).',
-            defaultValue: ''
-        )
-
         /*
          * ORT evaluator tool parameters.
          */
@@ -260,7 +254,6 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -289,7 +282,6 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 PROJECT_DIR = "${env.HOME}/project"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -337,7 +329,6 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 ORT_DATA_DIR = "${env.HOME}/.ort"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -399,7 +390,6 @@ pipeline {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
                 PROJECT_DIR = "${env.HOME}/project"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -488,7 +478,6 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -610,7 +599,6 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -678,7 +666,6 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
@@ -739,7 +726,6 @@ pipeline {
             environment {
                 HOME = "${env.WORKSPACE}@tmp"
                 JAVA_OPTS = "-Duser.home=${env.HOME}"
-                SERVER_TOKEN = "${params.DOS_API_KEY}"
             }
 
             steps {
