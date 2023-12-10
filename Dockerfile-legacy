@@ -147,6 +147,17 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
         libssl3 \
         libstdc++6 \
         libunwind8 \
+        # BitBake requirements.
+        bzip2 \
+        chrpath \
+        cpio \
+        diffstat \
+        file \
+        g++ \
+        lz4 \
+        gawk \
+        patch \
+        zstd \
     && \
     rm -rf /var/lib/apt/lists/* && \
     git lfs install
