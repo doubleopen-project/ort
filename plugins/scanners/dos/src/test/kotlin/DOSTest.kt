@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2023 Double Open Oy <support@doubleopen.org>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 package org.ossreviewtoolkit.plugins.scanners.dos
 
 import com.github.tomakehurst.wiremock.WireMockServer
