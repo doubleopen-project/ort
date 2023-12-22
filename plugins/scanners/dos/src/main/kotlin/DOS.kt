@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023 HH Partners
+ * SPDX-FileCopyrightText: 2023 Double Open Oy <support@doubleopen.org>
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,8 +43,6 @@ import org.ossreviewtoolkit.utils.spdx.toSpdx
 /**
  * DOS scanner is the ORT implementation of a ScanCode-based backend scanner, and it is a part of
  * DoubleOpen project: https://github.com/doubleopen-project/dos
- *
- * Copyright (c) 2023 HH Partners
  */
 class DOS internal constructor(
     override val name: String,
