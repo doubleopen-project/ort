@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023 HH Partners
+ * SPDX-FileCopyrightText: 2023 Double Open Oy <support@doubleopen.org>
  *
  * SPDX-License-Identifier: MIT
  */
