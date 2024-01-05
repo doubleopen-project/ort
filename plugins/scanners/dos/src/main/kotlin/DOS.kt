@@ -17,18 +17,15 @@ import org.apache.logging.log4j.kotlin.logger
 import org.ossreviewtoolkit.clients.dos.DOSRepository
 import org.ossreviewtoolkit.clients.dos.DOSService
 import org.ossreviewtoolkit.downloader.Downloader
-import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
-import org.ossreviewtoolkit.model.RemoteArtifact
-import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.UnknownProvenance
-import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.utils.associateLicensesWithExceptions
+import org.ossreviewtoolkit.model.utils.toProvenance
 import org.ossreviewtoolkit.scanner.PackageScannerWrapper
 import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerMatcher
@@ -73,33 +70,31 @@ class DOS internal constructor(
         val tmpDir = "/tmp/"
 
         val issues = mutableListOf<Issue>()
-        val purls = context.coveredPackages.getDosPurls()
-
-        // Decide which provenance type this package is
-        val provenance = if (pkg.vcsProcessed != VcsInfo.EMPTY && pkg.vcsProcessed.revision != "") {
-            RepositoryProvenance(pkg.vcsProcessed, pkg.vcsProcessed.revision)
-        } else if (pkg.sourceArtifact != RemoteArtifact.EMPTY) {
-            ArtifactProvenance(pkg.sourceArtifact)
-        } else {
-            UnknownProvenance
-        }
+        val requestedProvenance = nestedProvenance?.root ?: UnknownProvenance
+        val requestedPurls = context.coveredPackages.getDosPurls(requestedProvenance)
 
         logger.info { "Package to scan: ${pkg.purl}" }
 
         val scanResults = runBlocking {
             // Ask for scan results from DOS API
-            val existingScanResults = repository.getScanResults(purls, config.fetchConcluded)
+            val existingScanResults = repository.getScanResults(requestedPurls, config.fetchConcluded)
 
             when (existingScanResults?.state?.status) {
                 "no-results" -> {
                     // Download the package to an ORT specific local file structure
                     val dosDir = createOrtTempDir()
                     val downloader = Downloader(downloaderConfig)
-                    downloader.download(pkg, dosDir)
+                    val actualProvenance = downloader.download(pkg, dosDir)
+                    if (actualProvenance is UnknownProvenance) {
+                        logger.info { "Skipping scan for package '${pkg.id.toCoordinates()}' with unknown provenance." }
+                        return@runBlocking null
+                    }
+
                     logger.info { "Package downloaded to: $dosDir" }
 
                     // Start backend scanning
-                    runBackendScan(purls, dosDir, tmpDir, startTime, issues)
+                    val actualPurls = context.coveredPackages.getDosPurls(actualProvenance)
+                    runBackendScan(actualPurls, dosDir, tmpDir, startTime, issues)
                 }
 
                 "pending" -> {
@@ -107,7 +102,7 @@ class DOS internal constructor(
                         "The job ID must not be null for 'pending' status."
                     }
 
-                    pollForCompletion(purls.first(), jobId, "Pending scan", startTime)
+                    pollForCompletion(requestedPurls.first(), jobId, "Pending scan", startTime)
                 }
 
                 "ready" -> existingScanResults
@@ -130,9 +125,8 @@ class DOS internal constructor(
 
         val endTime = Instant.now()
 
-        /**
-         * Handle gracefully non-successful calls to DOS backend and log issues for failing tasks
-         */
+        val scannedProvenance = scanResults?.purls?.first()?.toProvenance() ?: UnknownProvenance
+
         val summary = if (scanResults?.results != null) {
             val parsedSummary = generateSummary(startTime, endTime, scanResults.results!!)
             parsedSummary.copy(issues = parsedSummary.issues + issues)
@@ -151,7 +145,7 @@ class DOS internal constructor(
         }
 
         return ScanResult(
-            provenance,
+            scannedProvenance,
             details,
             summary.copy(licenseFindings = fixedUpLicenses)
         )
