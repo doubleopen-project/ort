@@ -28,11 +28,13 @@ import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageType
 import org.ossreviewtoolkit.model.RemoteArtifact
+import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
+import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 
 class DOSTest : StringSpec({
@@ -188,6 +190,13 @@ class DOSTest : StringSpec({
 
         val scanResult = dos.scanPackage(
             pkg,
+            NestedProvenance(
+                root = RepositoryProvenance(
+                    vcsInfo = pkg.vcsProcessed,
+                    resolvedRevision = pkg.vcsProcessed.revision
+                ),
+                subRepositories = emptyMap()
+            ),
             ScanContext(
                 labels = emptyMap(),
                 packageType = PackageType.PROJECT,
@@ -228,6 +237,13 @@ class DOSTest : StringSpec({
 
         val scanResult = dos.scanPackage(
             pkg,
+            NestedProvenance(
+                root = RepositoryProvenance(
+                    vcsInfo = pkg.vcsProcessed,
+                    resolvedRevision = pkg.vcsProcessed.revision
+                ),
+                subRepositories = emptyMap()
+            ),
             ScanContext(
                 labels = emptyMap(),
                 packageType = PackageType.PROJECT,
