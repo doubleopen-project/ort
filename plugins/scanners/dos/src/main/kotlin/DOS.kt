@@ -34,6 +34,7 @@ import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerMatcher
 import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.scanner.ScannerWrapperFactory
+import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.utils.common.Options
 import org.ossreviewtoolkit.utils.common.packZip
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
@@ -67,7 +68,7 @@ class DOS internal constructor(
     var repository = DOSRepository(service)
     private val totalScanStartTime = Instant.now()
 
-    override fun scanPackage(pkg: Package, context: ScanContext): ScanResult {
+    override fun scanPackage(pkg: Package, nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
         val startTime = Instant.now()
         val tmpDir = "/tmp/"
 
