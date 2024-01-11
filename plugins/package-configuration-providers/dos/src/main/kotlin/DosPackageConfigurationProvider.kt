@@ -23,7 +23,7 @@ import org.ossreviewtoolkit.model.config.PathExcludeReason
 import org.ossreviewtoolkit.model.config.VcsMatcher
 import org.ossreviewtoolkit.model.utils.PackageConfigurationProvider
 import org.ossreviewtoolkit.model.utils.toPurl
-import org.ossreviewtoolkit.model.utils.vcsPath
+import org.ossreviewtoolkit.model.utils.toPurlExtras
 import org.ossreviewtoolkit.plugins.packageconfigurationproviders.api.PackageConfigurationProviderFactory
 import org.ossreviewtoolkit.utils.common.Options
 import org.ossreviewtoolkit.utils.spdx.SpdxExpression
@@ -63,7 +63,7 @@ class DosPackageConfigurationProvider(config: DosPackageConfigurationProviderCon
     private var repository = DOSRepository(service)
 
     override fun getPackageConfigurations(packageId: Identifier, provenance: Provenance): List<PackageConfiguration> {
-        val purl = packageId.toPurl(subpath = provenance.vcsPath)
+        val purl = packageId.toPurl(provenance.toPurlExtras())
 
         val packageResults = runBlocking { repository.postPackageConfiguration(purl) }
         if (packageResults == null) {
