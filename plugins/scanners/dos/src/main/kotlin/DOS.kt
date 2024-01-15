@@ -73,7 +73,7 @@ class DOS internal constructor(
         val requestedProvenance = nestedProvenance?.root ?: UnknownProvenance
         val requestedPurls = context.coveredPackages.getDosPurls(requestedProvenance)
 
-        logger.info { "Package to scan: ${pkg.purl}" }
+        logger.info { "Packages requested for scanning: ${requestedPurls.joinToString()}" }
 
         val scanResults = runBlocking {
             // Ask for scan results from DOS API
@@ -84,9 +84,18 @@ class DOS internal constructor(
                     // Download the package to an ORT specific local file structure
                     val dosDir = createOrtTempDir()
                     val downloader = Downloader(downloaderConfig)
+
+                    // TODO: Downloading shouldn't rely on the "reference package" but directly use the
+                    //       "requestedProvenance" for download in order to not redo the provenance resolution that the
+                    //       scanner already did. However, this requires to do an ORT upstream change first.
                     val actualProvenance = downloader.download(pkg, dosDir)
+
                     if (actualProvenance is UnknownProvenance) {
-                        logger.info { "Skipping scan for package '${pkg.id.toCoordinates()}' with unknown provenance." }
+                        logger.info {
+                            val coordinates = context.coveredPackages.joinToString { it.id.toCoordinates() }
+                            "Skipping scan for the following packages with unknown provenance: $coordinates"
+                        }
+
                         return@runBlocking null
                     }
 
