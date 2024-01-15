@@ -9,9 +9,9 @@ package org.ossreviewtoolkit.plugins.scanners.dos
 import java.time.Duration
 import java.time.Instant
 
-import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Provenance
+import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.model.utils.toPurl
 import org.ossreviewtoolkit.model.utils.toPurlExtras
@@ -20,7 +20,10 @@ internal fun Collection<Package>.getDosPurls(provenance: Provenance = UnknownPro
     val extras = provenance.toPurlExtras()
 
     return when (provenance) {
-        is KnownProvenance -> map { it.id.toPurl(extras) }
+        is RepositoryProvenance -> {
+            map { it.id.toPurl(extras.qualifiers, it.vcsProcessed.path) }
+        }
+
         else -> map { it.purl }
     }
 }
