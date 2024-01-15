@@ -16,11 +16,14 @@ import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.model.utils.toPurl
 import org.ossreviewtoolkit.model.utils.toPurlExtras
 
-internal fun Collection<Package>.getDosPurls(provenance: Provenance = UnknownProvenance): List<String> =
-    when {
-        provenance is KnownProvenance -> map { it.id.toPurl(provenance.toPurlExtras()) }
+internal fun Collection<Package>.getDosPurls(provenance: Provenance = UnknownProvenance): List<String> {
+    val extras = provenance.toPurlExtras()
+
+    return when {
+        provenance is KnownProvenance -> map { it.id.toPurl(extras) }
         else -> map { it.purl }
     }
+}
 
 /**
  * Elapsed time for a scanjob.
