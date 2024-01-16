@@ -68,7 +68,15 @@ class DOS internal constructor(
         val issues = mutableListOf<Issue>()
 
         val scanResults = runBlocking {
-            val provenance = nestedProvenance?.root ?: return@runBlocking null
+            val provenance = nestedProvenance?.root ?: run {
+                logger.warn {
+                    val cleanPurls = context.coveredPackages.joinToString { it.purl }
+                    "Skipping scan as no provenance information is available for these packages: $cleanPurls"
+                }
+
+                return@runBlocking null
+            }
+
             val purls = context.coveredPackages.getDosPurls(provenance)
 
             logger.info { "Packages requested for scanning: ${purls.joinToString()}" }
