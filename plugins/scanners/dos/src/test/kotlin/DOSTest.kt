@@ -189,7 +189,6 @@ class DOSTest : StringSpec({
         )
 
         val scanResult = dos.scanPackage(
-            pkg,
             NestedProvenance(
                 root = RepositoryProvenance(
                     vcsInfo = pkg.vcsProcessed,
@@ -236,7 +235,6 @@ class DOSTest : StringSpec({
         )
 
         val scanResult = dos.scanPackage(
-            pkg,
             NestedProvenance(
                 root = RepositoryProvenance(
                     vcsInfo = pkg.vcsProcessed,
