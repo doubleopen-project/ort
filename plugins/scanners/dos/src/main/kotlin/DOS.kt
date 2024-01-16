@@ -16,26 +16,24 @@ import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.clients.dos.DOSRepository
 import org.ossreviewtoolkit.clients.dos.DOSService
-import org.ossreviewtoolkit.downloader.Downloader
 import org.ossreviewtoolkit.model.Issue
-import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.utils.associateLicensesWithExceptions
-import org.ossreviewtoolkit.model.utils.toProvenance
 import org.ossreviewtoolkit.scanner.PackageScannerWrapper
 import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerMatcher
 import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.scanner.ScannerWrapperFactory
+import org.ossreviewtoolkit.scanner.provenance.DefaultProvenanceDownloader
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
+import org.ossreviewtoolkit.scanner.utils.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.utils.common.Options
 import org.ossreviewtoolkit.utils.common.packZip
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 /**
@@ -46,8 +44,6 @@ class DOS internal constructor(
     override val name: String,
     private val config: DOSConfig, override val readFromStorage: Boolean, override val writeToStorage: Boolean
 ) : PackageScannerWrapper {
-    private val downloaderConfig = DownloaderConfiguration()
-
     class Factory : ScannerWrapperFactory<DOSConfig>("DOS") {
         override fun create(config: DOSConfig, wrapperConfig: ScannerWrapperConfig) =
             DOS(type, config, readFromStorage = false, writeToStorage = false)
@@ -65,45 +61,30 @@ class DOS internal constructor(
     var repository = DOSRepository(service)
     private val totalScanStartTime = Instant.now()
 
-    override fun scanPackage(pkg: Package, nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
+    override fun scanPackage(nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
         val startTime = Instant.now()
+
         val tmpDir = "/tmp/"
-
         val issues = mutableListOf<Issue>()
-        val requestedProvenance = nestedProvenance?.root ?: UnknownProvenance
-        val requestedPurls = context.coveredPackages.getDosPurls(requestedProvenance)
-
-        logger.info { "Packages requested for scanning: ${requestedPurls.joinToString()}" }
 
         val scanResults = runBlocking {
+            val provenance = nestedProvenance?.root ?: return@runBlocking null
+            val purls = context.coveredPackages.getDosPurls(provenance)
+
+            logger.info { "Packages requested for scanning: ${purls.joinToString()}" }
+
             // Ask for scan results from DOS API
-            val existingScanResults = repository.getScanResults(requestedPurls, config.fetchConcluded)
+            val existingScanResults = repository.getScanResults(purls, config.fetchConcluded)
 
             when (existingScanResults?.state?.status) {
                 "no-results" -> {
-                    // Download the package to an ORT specific local file structure
-                    val dosDir = createOrtTempDir()
-                    val downloader = Downloader(downloaderConfig)
-
-                    // TODO: Downloading shouldn't rely on the "reference package" but directly use the
-                    //       "requestedProvenance" for download in order to not redo the provenance resolution that the
-                    //       scanner already did. However, this requires to do an ORT upstream change first.
-                    val actualProvenance = downloader.download(pkg, dosDir)
-
-                    if (actualProvenance is UnknownProvenance) {
-                        logger.info {
-                            val coordinates = context.coveredPackages.joinToString { it.id.toCoordinates() }
-                            "Skipping scan for the following packages with unknown provenance: $coordinates"
-                        }
-
-                        return@runBlocking null
-                    }
+                    val downloader = DefaultProvenanceDownloader(DownloaderConfiguration(), DefaultWorkingTreeCache())
+                    val dosDir = downloader.download(provenance)
 
                     logger.info { "Package downloaded to: $dosDir" }
 
                     // Start backend scanning
-                    val actualPurls = context.coveredPackages.getDosPurls(actualProvenance)
-                    runBackendScan(actualPurls, dosDir, tmpDir, startTime, issues)
+                    runBackendScan(purls, dosDir, tmpDir, startTime, issues)
                 }
 
                 "pending" -> {
@@ -111,7 +92,7 @@ class DOS internal constructor(
                         "The job ID must not be null for 'pending' status."
                     }
 
-                    pollForCompletion(requestedPurls.first(), jobId, "Pending scan", startTime)
+                    pollForCompletion(purls.first(), jobId, "Pending scan", startTime)
                 }
 
                 "ready" -> existingScanResults
@@ -134,8 +115,6 @@ class DOS internal constructor(
 
         val endTime = Instant.now()
 
-        val scannedProvenance = scanResults?.purls?.first()?.toProvenance() ?: UnknownProvenance
-
         val summary = if (scanResults?.results != null) {
             val parsedSummary = generateSummary(startTime, endTime, scanResults.results!!)
             parsedSummary.copy(issues = parsedSummary.issues + issues)
@@ -154,7 +133,7 @@ class DOS internal constructor(
         }
 
         return ScanResult(
-            scannedProvenance,
+            nestedProvenance?.root ?: UnknownProvenance,
             details,
             summary.copy(licenseFindings = fixedUpLicenses)
         )
