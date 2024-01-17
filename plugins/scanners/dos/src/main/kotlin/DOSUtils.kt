@@ -24,7 +24,7 @@ internal fun Collection<Package>.getDosPurls(provenance: Provenance = UnknownPro
             map { it.id.toPurl(extras.qualifiers, it.vcsProcessed.path) }
         }
 
-        else -> map { it.purl }
+        else -> map { it.id.toPurl(extras) }
     }
 }
 
