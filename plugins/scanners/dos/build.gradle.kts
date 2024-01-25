@@ -24,13 +24,13 @@ plugins {
 }
 
 dependencies {
-    api(project(":model"))
-    api(project(":scanner"))
+    api(projects.model)
+    api(projects.scanner)
 
     implementation(libs.bundles.kotlinxSerialization)
     implementation(libs.kotlinx.coroutines)
-    implementation(project(":clients:dos-client"))
-    implementation(project(mapOf("path" to ":downloader")))
+    implementation(projects.clients.dosClient)
+    implementation(projects.downloader)
 
     testImplementation(libs.mockk)
     testImplementation(libs.wiremock)
