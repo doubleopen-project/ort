@@ -23,7 +23,7 @@ plugins {
 }
 
 dependencies {
-    api(project(":plugins:package-configuration-providers:package-configuration-provider-api"))
-    implementation(project(":clients:dos-client"))
+    api(projects.plugins.packageConfigurationProviders.packageConfigurationProviderApi)
+    implementation(projects.clients.dosClient)
     implementation(libs.kotlinx.coroutines)
 }
