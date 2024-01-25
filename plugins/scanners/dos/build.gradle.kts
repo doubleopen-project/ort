@@ -28,7 +28,7 @@ dependencies {
     api(project(":scanner"))
 
     implementation(libs.bundles.kotlinxSerialization)
-    implementation(libs.kotlinxCoroutines)
+    implementation(libs.kotlinx.coroutines)
     implementation(project(":clients:dos-client"))
     implementation(project(mapOf("path" to ":downloader")))
 
