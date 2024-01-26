@@ -27,9 +27,9 @@ import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.TextLocation
 
 internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonObject): ScanSummary {
-    val licenseFindings = getLicenseFindings(result)
-    val copyrightFindings = getCopyrightFindings(result)
-    val issues = getIssues(result)
+    val licenseFindings = result.getLicenseFindings()
+    val copyrightFindings = result.getCopyrightFindings()
+    val issues = result.getIssues()
 
     return ScanSummary(
         startTime,
@@ -40,8 +40,9 @@ internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonO
         issues
     )
 }
-private fun getLicenseFindings(result: JsonObject): Set<LicenseFinding> {
-    val licenses = result["licenses"]?.jsonArray ?: return emptySet()
+
+private fun JsonObject.getLicenseFindings(): Set<LicenseFinding> {
+    val licenses = get("licenses")?.jsonArray ?: return emptySet()
 
     return licenses.mapTo(mutableSetOf()) {
         val licenseNode = it.jsonObject
@@ -58,8 +59,8 @@ private fun getLicenseFindings(result: JsonObject): Set<LicenseFinding> {
     }
 }
 
-private fun getCopyrightFindings(result: JsonObject): Set<CopyrightFinding> {
-    val copyrights = result["copyrights"]?.jsonArray ?: return emptySet()
+private fun JsonObject.getCopyrightFindings(): Set<CopyrightFinding> {
+    val copyrights = get("copyrights")?.jsonArray ?: return emptySet()
 
     return copyrights.mapTo(mutableSetOf()) {
         val copyrightNode = it.jsonObject
@@ -75,8 +76,8 @@ private fun getCopyrightFindings(result: JsonObject): Set<CopyrightFinding> {
     }
 }
 
-private fun getIssues(result: JsonObject): List<Issue> {
-    val issues = result["issues"]?.jsonArray ?: return emptyList()
+private fun JsonObject.getIssues(): List<Issue> {
+    val issues = get("issues")?.jsonArray ?: return emptyList()
 
     return issues.map {
         val issueNode = it.jsonObject
