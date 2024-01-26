@@ -30,7 +30,7 @@ import org.ossreviewtoolkit.utils.spdx.toSpdx
 internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonObject): ScanSummary {
     val issues = mutableListOf<Issue>()
     val licenseFindings = result.getLicenseFindings(issues)
-    val copyrightFindings = result.getCopyrightFindings()
+    val copyrightFindings = result.getCopyrightFindings(issues)
     result.getIssues(issues)
 
     return ScanSummary(
@@ -70,10 +70,10 @@ private fun JsonObject.getLicenseFindings(issues: MutableList<Issue>): Set<Licen
     }
 }
 
-private fun JsonObject.getCopyrightFindings(): Set<CopyrightFinding> {
+private fun JsonObject.getCopyrightFindings(issues: MutableList<Issue>): Set<CopyrightFinding> {
     val copyrights = get("copyrights")?.jsonArray ?: return emptySet()
 
-    return copyrights.mapTo(mutableSetOf()) {
+    return copyrights.mapNotNullTo(mutableSetOf()) {
         val copyrightNode = it.jsonObject
 
         val statement = copyrightNode.getValue("statement").jsonPrimitive.content
@@ -83,7 +83,17 @@ private fun JsonObject.getCopyrightFindings(): Set<CopyrightFinding> {
         val startLine = location.getValue("start_line").jsonPrimitive.int
         val endLine = location.getValue("end_line").jsonPrimitive.int
 
-        CopyrightFinding(statement, TextLocation(path, startLine, endLine))
+        runCatching {
+            TextLocation(path, startLine, endLine)
+        }.map { textLocation ->
+            CopyrightFinding(statement, textLocation)
+        }.onFailure { exception ->
+            issues += Issue(
+                source = "DOSResultParser",
+                message = "Cannot create a text location from path '$path', start line $startLine and end line " +
+                    "$endLine: ${exception.message}"
+            )
+        }.getOrNull()
     }
 }
 
