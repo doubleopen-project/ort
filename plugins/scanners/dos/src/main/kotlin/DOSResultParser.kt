@@ -25,10 +25,11 @@ import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.TextLocation
+import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonObject): ScanSummary {
     val issues = mutableListOf<Issue>()
-    val licenseFindings = result.getLicenseFindings()
+    val licenseFindings = result.getLicenseFindings(issues)
     val copyrightFindings = result.getCopyrightFindings()
     result.getIssues(issues)
 
@@ -42,10 +43,10 @@ internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonO
     )
 }
 
-private fun JsonObject.getLicenseFindings(): Set<LicenseFinding> {
+private fun JsonObject.getLicenseFindings(issues: MutableList<Issue>): Set<LicenseFinding> {
     val licenses = get("licenses")?.jsonArray ?: return emptySet()
 
-    return licenses.mapTo(mutableSetOf()) {
+    return licenses.mapNotNullTo(mutableSetOf()) {
         val licenseNode = it.jsonObject
 
         val license = licenseNode.getValue("license").jsonPrimitive.content
@@ -56,7 +57,16 @@ private fun JsonObject.getLicenseFindings(): Set<LicenseFinding> {
         val endLine = location.getValue("end_line").jsonPrimitive.int
         val score = licenseNode.getValue("score").jsonPrimitive.float
 
-        LicenseFinding(license, TextLocation(path, startLine, endLine), score)
+        runCatching {
+            license.toSpdx()
+        }.map { licenseExpression ->
+            LicenseFinding(licenseExpression, TextLocation(path, startLine, endLine), score)
+        }.onFailure { exception ->
+            issues += Issue(
+                source = "DOSResultParser",
+                message = "Cannot parse '$license' as an SPDX expression: ${exception.message}"
+            )
+        }.getOrNull()
     }
 }
 
