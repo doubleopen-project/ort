@@ -27,9 +27,10 @@ import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.TextLocation
 
 internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonObject): ScanSummary {
+    val issues = mutableListOf<Issue>()
     val licenseFindings = result.getLicenseFindings()
     val copyrightFindings = result.getCopyrightFindings()
-    val issues = result.getIssues()
+    result.getIssues(issues)
 
     return ScanSummary(
         startTime,
@@ -76,10 +77,8 @@ private fun JsonObject.getCopyrightFindings(): Set<CopyrightFinding> {
     }
 }
 
-private fun JsonObject.getIssues(): List<Issue> {
-    val issues = get("issues")?.jsonArray ?: return emptyList()
-
-    return issues.map {
+private fun JsonObject.getIssues(issues: MutableList<Issue>) {
+    get("issues")?.jsonArray.orEmpty().mapTo(issues) {
         val issueNode = it.jsonObject
         val timestamp = Instant.parse(issueNode.getValue("timestamp").jsonPrimitive.content)
         val source = issueNode.getValue("source").jsonPrimitive.content
