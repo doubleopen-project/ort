@@ -32,6 +32,7 @@ import org.ossreviewtoolkit.scanner.provenance.DefaultProvenanceDownloader
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.scanner.utils.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.utils.common.Options
+import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.packZip
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.spdx.toSpdx
@@ -82,7 +83,13 @@ class DOS internal constructor(
             logger.info { "Packages requested for scanning: ${purls.joinToString()}" }
 
             // Ask for scan results from DOS API
-            val existingScanResults = repository.getScanResults(purls, config.fetchConcluded)
+            val existingScanResults = runCatching {
+                repository.getScanResults(purls, config.fetchConcluded)
+            }.onFailure {
+                issues += createAndLogIssue(name, it.collectMessages())
+            }.onSuccess {
+                if (it == null) issues += createAndLogIssue(name, "Could not request scan results from DOS API")
+            }.getOrNull()
 
             when (existingScanResults?.state?.status) {
                 "no-results" -> {
@@ -114,10 +121,7 @@ class DOS internal constructor(
                     null
                 }
 
-                else -> {
-                    issues += createAndLogIssue(name, "Could not request scan results from DOS API")
-                    null
-                }
+                else -> null
             }
         }
 
