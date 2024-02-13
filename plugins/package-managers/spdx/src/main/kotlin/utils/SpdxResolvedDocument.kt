@@ -253,6 +253,14 @@ internal data class ResolutionResult(
 private fun URI.isLocalDefinitionFile(): Boolean = scheme.equals("file", ignoreCase = true) || !isAbsolute
 
 /**
+ * Check whether this URI is a conventional SPDX unique ID instead of a download location.
+ */
+private fun URI.isSpdxUniqueID(): Boolean =
+    // The implementation is lenient to accept both https://spdx.org/spdxdocs/ and http://spdx.org/spdxdoc/, also see
+    // https://bugzilla.yoctoproject.org/show_bug.cgi?id=15398.
+    scheme.lowercase().startsWith("http") && host == "spdx.org" && path.startsWith("spdxdoc")
+
+/**
  * Convert this URI to a local definition file if possible. Otherwise, return *null*.
  */
 private fun URI.toDefinitionFile(): File? =
