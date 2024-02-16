@@ -94,12 +94,15 @@ class DOS internal constructor(
             when (existingScanResults?.state?.status) {
                 "no-results" -> {
                     val downloader = DefaultProvenanceDownloader(DownloaderConfiguration(), DefaultWorkingTreeCache())
-                    val dosDir = downloader.download(provenance)
 
-                    logger.info { "Package downloaded to: $dosDir" }
-
-                    // Start backend scanning
-                    runBackendScan(purls, dosDir, tmpDir, startTime, issues)
+                    runCatching {
+                        downloader.download(provenance)
+                    }.mapCatching { dosDir ->
+                        logger.info { "Package downloaded to: $dosDir" }
+                        runBackendScan(purls, dosDir, tmpDir, startTime, issues)
+                    }.onFailure {
+                        issues += createAndLogIssue(name, it.collectMessages())
+                    }.getOrNull()
                 }
 
                 "pending" -> {
