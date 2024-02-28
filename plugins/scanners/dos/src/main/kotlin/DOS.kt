@@ -35,7 +35,6 @@ import org.ossreviewtoolkit.utils.common.Options
 import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.packZip
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 /**
  * DOS scanner is the ORT implementation of a ScanCode-based backend scanner, and it is a part of
@@ -137,20 +136,10 @@ class DOS internal constructor(
             ScanSummary.EMPTY.copy(startTime = startTime, endTime = endTime, issues = issues)
         }
 
-        val fixedUpLicenses = associateLicensesWithExceptions(summary.licenseFindings).mapTo(mutableSetOf()) {
-            // TODO: Remove this again once fixed upstream in ORT.
-            it.copy(
-                license = it.license.toString().replace(
-                    "GPL-2.0-only AND Classpath-exception-2.0",
-                    "GPL-2.0-only WITH Classpath-exception-2.0"
-                ).toSpdx()
-            )
-        }
-
         return ScanResult(
             nestedProvenance?.root ?: UnknownProvenance,
             details,
-            summary.copy(licenseFindings = fixedUpLicenses)
+            summary.copy(licenseFindings = associateLicensesWithExceptions(summary.licenseFindings))
         )
     }
 
