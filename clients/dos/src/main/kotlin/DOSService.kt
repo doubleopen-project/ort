@@ -6,8 +6,6 @@
 
 package org.ossreviewtoolkit.clients.dos
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-
 import java.time.Duration
 
 import kotlinx.serialization.Serializable
@@ -23,6 +21,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Invocation
 import retrofit2.Response
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
