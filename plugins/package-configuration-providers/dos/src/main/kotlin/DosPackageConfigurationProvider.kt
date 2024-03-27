@@ -22,6 +22,7 @@ import org.ossreviewtoolkit.model.config.PathExclude
 import org.ossreviewtoolkit.model.config.PathExcludeReason
 import org.ossreviewtoolkit.model.config.VcsMatcher
 import org.ossreviewtoolkit.model.utils.PackageConfigurationProvider
+import org.ossreviewtoolkit.model.utils.associateLicensesWithExceptions
 import org.ossreviewtoolkit.model.utils.toPurl
 import org.ossreviewtoolkit.model.utils.toPurlExtras
 import org.ossreviewtoolkit.plugins.packageconfigurationproviders.api.PackageConfigurationProviderFactory
@@ -116,7 +117,7 @@ internal fun generatePackageConfiguration(
 
         LicenseFindingCuration(
             path = licenseConclusion.path,
-            detectedLicense = detected,
+            detectedLicense = detected?.let { associateLicensesWithExceptions(it) },
             concludedLicense = concluded,
             reason = LicenseFindingCurationReason.INCORRECT,
             comment = licenseConclusion.comment.orEmpty()
