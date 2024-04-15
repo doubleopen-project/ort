@@ -129,8 +129,9 @@ class DOS internal constructor(
 
         val endTime = Instant.now()
 
-        val summary = if (scanResults?.results != null) {
-            val parsedSummary = generateSummary(startTime, endTime, scanResults.results!!)
+        val scanResultsJson = scanResults?.results
+        val summary = if (scanResultsJson != null) {
+            val parsedSummary = generateSummary(startTime, endTime, scanResultsJson)
             parsedSummary.copy(issues = parsedSummary.issues + issues)
         } else {
             ScanSummary.EMPTY.copy(startTime = startTime, endTime = endTime, issues = issues)
