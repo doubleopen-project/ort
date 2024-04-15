@@ -61,7 +61,7 @@ class DosPackageConfigurationProvider(config: DosPackageConfigurationProviderCon
     private val serverUrl = config.serverUrl
     private val restTimeout = config.restTimeout
     private val service = DOSService.create(serverUrl, config.serverToken, restTimeout)
-    private var repository = DOSRepository(service)
+    private val repository = DOSRepository(service)
 
     override fun getPackageConfigurations(packageId: Identifier, provenance: Provenance): List<PackageConfiguration> {
         val purl = packageId.toPurl(provenance.toPurlExtras())
