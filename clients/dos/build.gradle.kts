@@ -17,8 +17,6 @@
  * License-Filename: LICENSE
  */
 
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
     // Apply precompiled plugins.
     id("ort-library-conventions")
@@ -34,14 +32,4 @@ dependencies {
     implementation(libs.bundles.kotlinxSerialization)
     implementation(libs.retrofit.converter.kotlinxSerialization)
     implementation("com.squareup.okhttp3:logging-interceptor:4.9.3")
-}
-
-tasks.withType<KotlinCompile>().configureEach {
-    val customCompilerArgs = listOf(
-        "-opt-in=kotlinx.serialization.ExperimentalSerializationApi"
-    )
-
-    kotlinOptions {
-        freeCompilerArgs = freeCompilerArgs + customCompilerArgs
-    }
 }
