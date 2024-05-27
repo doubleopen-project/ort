@@ -30,6 +30,6 @@ dependencies {
     api(libs.log4j.api.kotlin)
 
     implementation(libs.bundles.kotlinxSerialization)
+    implementation(libs.okhttp.logging.interceptor)
     implementation(libs.retrofit.converter.kotlinxSerialization)
-    implementation("com.squareup.okhttp3:logging-interceptor:4.9.3")
 }
