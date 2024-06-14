@@ -122,7 +122,7 @@ class DOS internal constructor(
                         "The job ID must not be null for 'pending' status."
                     }
 
-                    pollForCompletion(purls.first(), jobId, "Pending scan", startTime)
+                    pollForCompletion(purls.first(), jobId, "Pending scan", startTime, issues)
                 }
 
                 "ready" -> existingScanResults
@@ -208,7 +208,7 @@ class DOS internal constructor(
             // In case of multiple PURLs, they all point to packages with the same provenance. So if one package scan is
             // complete, all package scans are complete, which is why it is enough to arbitrarily pool for the first
             // package here.
-            pollForCompletion(purls.first(), it, "New scan", thisScanStartTime)
+            pollForCompletion(purls.first(), it, "New scan", thisScanStartTime, issues)
         }
     }
 
@@ -216,7 +216,8 @@ class DOS internal constructor(
         purl: String,
         jobId: String,
         logMessagePrefix: String,
-        thisScanStartTime: Instant
+        thisScanStartTime: Instant,
+        issues: MutableList<Issue>
     ): DOSService.ScanResultsResponseBody? {
         while (true) {
             val jobState = repository.getJobState(jobId)
@@ -234,7 +235,7 @@ class DOS internal constructor(
                         return repository.getScanResults(listOf(purl), config.fetchConcluded)
                     }
                     "failed" -> {
-                        logger.error { "Scan failed" }
+                        issues += createAndLogIssue(name, "Scan failed in DOS API")
                         return null
                     }
                     else -> delay(config.pollInterval * 1000L)
