@@ -34,7 +34,7 @@ import org.apache.logging.log4j.kotlin.logger
 /**
  * This class implements the data layer of the DOS client.
  */
-class DOSRepository(private val dosService: DOSService) {
+class DosClient(private val service: DosService) {
     /**
      * Request a presigned URL from DOS API to upload a package to S3 Object Storage for scanning.
      * Response: the URL string or null if the request didn't succeed.
@@ -44,8 +44,8 @@ class DOSRepository(private val dosService: DOSService) {
             logger.error { "Need the name of the zipped packet to upload" }
             return null
         }
-        val requestBody = DOSService.UploadUrlRequestBody(key)
-        val response = dosService.postUploadUrl(requestBody)
+        val requestBody = DosService.UploadUrlRequestBody(key)
+        val response = service.postUploadUrl(requestBody)
 
         return if (response.isSuccessful) {
             if (response.body()?.success == true) {
@@ -79,7 +79,7 @@ class DOSRepository(private val dosService: DOSService) {
             file.readBytes().toRequestBody(mediaType)
         }
 
-        val response = dosService.putS3File(presignedUrl, requestBody)
+        val response = service.putS3File(presignedUrl, requestBody)
 
         return if (response.isSuccessful) {
             logger.info { "Packet successfully uploaded to S3" }
@@ -99,14 +99,14 @@ class DOSRepository(private val dosService: DOSService) {
      *   being scanned, return "pending" message
      * - otherwise, return "null"
      */
-    suspend fun getScanResults(purls: List<String>, fetchConcluded: Boolean): DOSService.ScanResultsResponseBody? {
+    suspend fun getScanResults(purls: List<String>, fetchConcluded: Boolean): DosService.ScanResultsResponseBody? {
         if (purls.isEmpty()) {
             logger.error { "Need the package URL to check for scan results" }
             return null
         }
-        val options = DOSService.ScanResultsRequestBody.ReqOptions(fetchConcluded)
-        val requestBody = DOSService.ScanResultsRequestBody(purls, options)
-        val response = dosService.postScanResults(requestBody)
+        val options = DosService.ScanResultsRequestBody.ReqOptions(fetchConcluded)
+        val requestBody = DosService.ScanResultsRequestBody(purls, options)
+        val response = service.postScanResults(requestBody)
 
         return if (response.isSuccessful) {
             when (response.body()?.state?.status) {
@@ -129,13 +129,13 @@ class DOSRepository(private val dosService: DOSService) {
     /**
      * Post a new scan job to DOS API for [zipFileKey] and [purl].
      */
-    suspend fun postScanJob(zipFileKey: String, purls: List<String>): DOSService.JobResponseBody? {
+    suspend fun postScanJob(zipFileKey: String, purls: List<String>): DosService.JobResponseBody? {
         if (zipFileKey.isEmpty() || purls.isEmpty()) {
             logger.error { "Need the Zip filename and package URL to send the scan job" }
             return null
         }
-        val requestBody = DOSService.JobRequestBody(zipFileKey, purls)
-        val response = dosService.postJob(requestBody)
+        val requestBody = DosService.JobRequestBody(zipFileKey, purls)
+        val response = service.postJob(requestBody)
 
         return if (response.isSuccessful) {
             response.body()
@@ -149,12 +149,12 @@ class DOSRepository(private val dosService: DOSService) {
      * Request job status from DOS API.
      * Response: waiting / active / completed / failed.
      */
-    suspend fun getJobState(id: String): DOSService.JobStateResponseBody? {
+    suspend fun getJobState(id: String): DosService.JobStateResponseBody? {
         if (id.isEmpty()) {
             logger.error { "Need the job ID to check for job state" }
             return null
         }
-        val response = dosService.getJobState(id)
+        val response = service.getJobState(id)
 
         return if (response.isSuccessful) {
             response.body()
@@ -167,13 +167,13 @@ class DOSRepository(private val dosService: DOSService) {
     /**
      * Request package configuration from DOS API.
      */
-    suspend fun postPackageConfiguration(purl: String): DOSService.PackageConfigurationResponseBody? {
+    suspend fun postPackageConfiguration(purl: String): DosService.PackageConfigurationResponseBody? {
         if (purl.isEmpty()) {
             logger.error { "Need the package URL to check for package configuration" }
             return null
         }
-        val requestBody = DOSService.PackageConfigurationRequestBody(purl)
-        val response = dosService.postPackageConfiguration(requestBody)
+        val requestBody = DosService.PackageConfigurationRequestBody(purl)
+        val response = service.postPackageConfiguration(requestBody)
 
         return if (response.isSuccessful) {
             response.body()

@@ -27,8 +27,8 @@ import kotlinx.coroutines.runBlocking
 
 import org.apache.logging.log4j.kotlin.logger
 
-import org.ossreviewtoolkit.clients.dos.DOSRepository
-import org.ossreviewtoolkit.clients.dos.DOSService
+import org.ossreviewtoolkit.clients.dos.DosClient
+import org.ossreviewtoolkit.clients.dos.DosService
 import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
@@ -53,15 +53,15 @@ import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
  * DOS scanner is the ORT implementation of a ScanCode-based backend scanner, and it is a part of
  * DoubleOpen project: https://github.com/doubleopen-project/dos
  */
-class DOS internal constructor(
+class DosScanner internal constructor(
     override val name: String,
-    private val config: DOSConfig, override val readFromStorage: Boolean, override val writeToStorage: Boolean
+    private val config: DosScannerConfig, override val readFromStorage: Boolean, override val writeToStorage: Boolean
 ) : PackageScannerWrapper {
-    class Factory : ScannerWrapperFactory<DOSConfig>("DOS") {
-        override fun create(config: DOSConfig, wrapperConfig: ScannerWrapperConfig) =
-            DOS(type, config, readFromStorage = false, writeToStorage = false)
+    class Factory : ScannerWrapperFactory<DosScannerConfig>("DOS") {
+        override fun create(config: DosScannerConfig, wrapperConfig: ScannerWrapperConfig) =
+            DosScanner(type, config, readFromStorage = false, writeToStorage = false)
 
-        override fun parseConfig(options: Options, secrets: Options) = DOSConfig.create(options, secrets)
+        override fun parseConfig(options: Options, secrets: Options) = DosScannerConfig.create(options, secrets)
     }
 
     override val matcher: ScannerMatcher? = null
@@ -70,8 +70,8 @@ class DOS internal constructor(
     // Later on, use DOS API to return API's version and use it here
     override val version = "1.0"
 
-    private val service = DOSService.create(config.serverUrl, config.serverToken, config.restTimeout)
-    var repository = DOSRepository(service)
+    private val service = DosService.create(config.serverUrl, config.serverToken, config.restTimeout)
+    var repository = DosClient(service)
     private val totalScanStartTime = Instant.now()
 
     override fun scanPackage(nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
@@ -163,7 +163,7 @@ class DOS internal constructor(
         tmpDir: String,
         thisScanStartTime: Instant,
         issues: MutableList<Issue>
-    ): DOSService.ScanResultsResponseBody? {
+    ): DosService.ScanResultsResponseBody? {
         logger.info { "Initiating a backend scan" }
 
         // Zip the packet to scan and do local cleanup
@@ -177,7 +177,7 @@ class DOS internal constructor(
         if (presignedUrl == null) {
             issues += createAndLogIssue(name, "Could not get a presigned URL for this package")
             targetZipFile.delete() // local cleanup before returning
-            return DOSService.ScanResultsResponseBody(DOSService.ScanResultsResponseBody.State("failed"))
+            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
         }
 
         // Transfer the zipped packet to S3 Object Storage and do local cleanup
@@ -185,7 +185,7 @@ class DOS internal constructor(
         if (!uploadSuccessful) {
             issues += createAndLogIssue(name, "Could not upload the packet to S3")
             targetZipFile.delete() // local cleanup before returning
-            return DOSService.ScanResultsResponseBody(DOSService.ScanResultsResponseBody.State("failed"))
+            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
         }
         targetZipFile.delete() // make sure the zipped packet is always deleted locally
 
@@ -197,11 +197,11 @@ class DOS internal constructor(
             logger.info { "New scan request: Packages = ${purls.joinToString()}, Zip file = $zipName" }
             if (jobResponse.message == "Adding job to queue was unsuccessful") {
                 issues += createAndLogIssue(name, "DOS API: 'unsuccessful' response to the scan job request")
-                return DOSService.ScanResultsResponseBody(DOSService.ScanResultsResponseBody.State("failed"))
+                return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
             }
         } else {
             issues += createAndLogIssue(name, "Could not create a new scan job at DOS API")
-            return DOSService.ScanResultsResponseBody(DOSService.ScanResultsResponseBody.State("failed"))
+            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
         }
 
         return id?.let {
@@ -218,7 +218,7 @@ class DOS internal constructor(
         logMessagePrefix: String,
         thisScanStartTime: Instant,
         issues: MutableList<Issue>
-    ): DOSService.ScanResultsResponseBody? {
+    ): DosService.ScanResultsResponseBody? {
         while (true) {
             val jobState = repository.getJobState(jobId)
             if (jobState != null) {

@@ -35,7 +35,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-import org.ossreviewtoolkit.clients.dos.DOSService
+import org.ossreviewtoolkit.clients.dos.DosService
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
@@ -50,8 +50,8 @@ import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 
-class DOSTest : StringSpec({
-    lateinit var dos: DOS
+class DosScannerTest : StringSpec({
+    lateinit var scanner: DosScanner
     val json = Json { prettyPrint = true }
 
     val server = WireMockServer(
@@ -62,7 +62,7 @@ class DOSTest : StringSpec({
 
     beforeTest {
         server.start()
-        val config = DOSConfig(
+        val config = DosScannerConfig(
             serverUrl = "http://localhost:${server.port()}/api/",
             serverToken = "",
             pollInterval = 5,
@@ -70,7 +70,7 @@ class DOSTest : StringSpec({
             fetchConcluded = false,
             frontendUrl = "http://localhost:3000"
         )
-        dos = DOS.Factory().create(config, ScannerWrapperConfig.EMPTY)
+        scanner = DosScanner.Factory().create(config, ScannerWrapperConfig.EMPTY)
     }
 
     afterTest {
@@ -86,7 +86,7 @@ class DOSTest : StringSpec({
                 )
         )
         runBlocking {
-            dos.repository.getScanResults(emptyList(), false) shouldBe null
+            scanner.repository.getScanResults(emptyList(), false) shouldBe null
         }
     }
 
@@ -100,7 +100,7 @@ class DOSTest : StringSpec({
                 )
         )
         runBlocking {
-            val status = dos.repository.getScanResults(listOf("purl"), false)?.state?.status
+            val status = scanner.repository.getScanResults(listOf("purl"), false)?.state?.status
             status shouldBe "no-results"
         }
     }
@@ -115,7 +115,7 @@ class DOSTest : StringSpec({
                 )
         )
         runBlocking {
-            val response = dos.repository.getScanResults(listOf("purl"), false)
+            val response = scanner.repository.getScanResults(listOf("purl"), false)
             val status = response?.state?.status
             val jobId = response?.state?.jobId
             status shouldBe "pending"
@@ -133,12 +133,12 @@ class DOSTest : StringSpec({
                 )
         )
         runBlocking {
-            val response = dos.repository.getScanResults(listOf("purl"), false)
+            val response = scanner.repository.getScanResults(listOf("purl"), false)
             val status = response?.state?.status
             val jobId = response?.state?.jobId
 
             val resultsJson = json.encodeToString(response?.results)
-            val readyResponse = json.decodeFromString<DOSService.ScanResultsResponseBody>(
+            val readyResponse = json.decodeFromString<DosService.ScanResultsResponseBody>(
                 getResourceAsString("/ready.json")
             )
             val expectedJson = json.encodeToString(readyResponse.results)
@@ -166,7 +166,7 @@ class DOSTest : StringSpec({
             binaryArtifact = RemoteArtifact.EMPTY.copy(url = "https://www.apache.org/dist/commons/commons-lang3/3.9/")
         )
         val result = runBlocking {
-            dos.runBackendScan(
+            scanner.runBackendScan(
                 listOf(pkg.purl),
                 dosDir,
                 tmpDir,
@@ -201,7 +201,7 @@ class DOSTest : StringSpec({
             )
         )
 
-        val scanResult = dos.scanPackage(
+        val scanResult = scanner.scanPackage(
             NestedProvenance(
                 root = RepositoryProvenance(
                     vcsInfo = pkg.vcsProcessed,
@@ -247,7 +247,7 @@ class DOSTest : StringSpec({
             )
         )
 
-        val scanResult = dos.scanPackage(
+        val scanResult = scanner.scanPackage(
             NestedProvenance(
                 root = RepositoryProvenance(
                     vcsInfo = pkg.vcsProcessed,

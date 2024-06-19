@@ -45,7 +45,7 @@ import retrofit2.http.Url
 /**
  * A Retrofit2 interface to define the network layer of the DOS client.
  */
-interface DOSService {
+interface DosService {
     companion object {
         /**
          * The JSON (de-)serialization object used by this service.
@@ -57,7 +57,7 @@ interface DOSService {
         /**
          * Create a new service instance that connects to the [url] specified and uses the optionally provided [client].
          */
-        fun create(url: String, token: String, timeout: Int, client: OkHttpClient? = null): DOSService {
+        fun create(url: String, token: String, timeout: Int, client: OkHttpClient? = null): DosService {
             val contentType = "application/json; charset=utf-8".toMediaType()
 
             val loggingInterceptor = HttpLoggingInterceptor().apply {
@@ -83,7 +83,7 @@ interface DOSService {
                 .addConverterFactory(JSON.asConverterFactory(contentType))
                 .build()
 
-            return retrofit.create(DOSService::class.java)
+            return retrofit.create(DosService::class.java)
         }
     }
 

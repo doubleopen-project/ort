@@ -23,8 +23,8 @@ import kotlinx.coroutines.runBlocking
 
 import org.apache.logging.log4j.kotlin.logger
 
-import org.ossreviewtoolkit.clients.dos.DOSRepository
-import org.ossreviewtoolkit.clients.dos.DOSService
+import org.ossreviewtoolkit.clients.dos.DosClient
+import org.ossreviewtoolkit.clients.dos.DosService
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Provenance
@@ -74,8 +74,8 @@ open class DosPackageConfigurationProviderFactory :
 class DosPackageConfigurationProvider(config: DosPackageConfigurationProviderConfig) : PackageConfigurationProvider {
     private val serverUrl = config.serverUrl
     private val restTimeout = config.restTimeout
-    private val service = DOSService.create(serverUrl, config.serverToken, restTimeout)
-    private val repository = DOSRepository(service)
+    private val service = DosService.create(serverUrl, config.serverToken, restTimeout)
+    private val repository = DosClient(service)
 
     override fun getPackageConfigurations(packageId: Identifier, provenance: Provenance): List<PackageConfiguration> {
         val purl = packageId.toPurl(provenance.toPurlExtras())
@@ -105,7 +105,7 @@ class DosPackageConfigurationProvider(config: DosPackageConfigurationProviderCon
 internal fun generatePackageConfiguration(
     id: Identifier,
     provenance: Provenance,
-    packageResults: DOSService.PackageConfigurationResponseBody
+    packageResults: DosService.PackageConfigurationResponseBody
 ): PackageConfiguration {
     val sourceArtifactUrl = if (provenance is ArtifactProvenance) {
         provenance.sourceArtifact.url

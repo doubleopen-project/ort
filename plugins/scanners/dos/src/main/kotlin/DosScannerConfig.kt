@@ -24,7 +24,7 @@ import org.ossreviewtoolkit.utils.common.Options
 /**
  * This is the configuration class for DOS Scanner.
  */
-data class DOSConfig(
+data class DosScannerConfig(
     /** The URL where the DOS service is running. **/
     val serverUrl: String,
 
@@ -68,7 +68,7 @@ data class DOSConfig(
         private const val DEFAULT_REST_TIMEOUT = 60
         private const val DEFAULT_FETCH_CONCLUDED = false
 
-        fun create(options: Options, secrets: Options): DOSConfig {
+        fun create(options: Options, secrets: Options): DosScannerConfig {
             require(options.isNotEmpty()) { "No DOS Scanner configuration found." }
 
             val serverUrl = options[SERVER_URL_PROPERTY] ?: DEFAULT_SERVER_URL
@@ -93,7 +93,7 @@ data class DOSConfig(
 
             val frontendUrl = options[FRONT_END_URL_PROPERTY] ?: DEFAULT_FRONT_END_URL
 
-            return DOSConfig(
+            return DosScannerConfig(
                 serverUrl = serverUrl,
                 serverToken = serverToken,
                 pollInterval = pollInterval,
