@@ -46,6 +46,15 @@ data class UploadUrlResponseBody(
     val message: String? = null
 )
 
+/** Information needed to create a Package row in DOS database */
+@Serializable
+data class PackageInfo(
+    /** The purl for a package (includes the VCS information) */
+    val purl: String,
+    /** The declared license for the package */
+    val declaredLicenseExpressionSPDX: String?
+)
+
 @Serializable
 data class ScanResultsRequestBody(
     /**
@@ -90,8 +99,8 @@ data class JobRequestBody(
     /** The key of the previously uploaded ZIP file to scan. */
     val zipFileKey: String,
 
-    /** The list of purls whose packages' source code is contained in the ZIP file. */
-    val purls: List<String>
+    /** The list of purls and declared licenses for the packages whose source code is contained in the ZIP file. */
+    val packages: List<PackageInfo>? = null
 )
 
 @Serializable
