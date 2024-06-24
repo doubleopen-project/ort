@@ -27,6 +27,7 @@ import com.github.tomakehurst.wiremock.common.ConsoleNotifier
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
 import io.kotest.core.spec.style.StringSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 
 import java.time.Instant
@@ -35,7 +36,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-import org.ossreviewtoolkit.clients.dos.DosService
+import org.ossreviewtoolkit.clients.dos.ScanResultsResponseBody
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
@@ -48,7 +49,6 @@ import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
-import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 
 class DosScannerTest : StringSpec({
     lateinit var scanner: DosScanner
@@ -63,10 +63,10 @@ class DosScannerTest : StringSpec({
     beforeTest {
         server.start()
         val config = DosScannerConfig(
-            serverUrl = "http://localhost:${server.port()}/api/",
-            serverToken = "",
+            url = "http://localhost:${server.port()}/api/",
+            token = "",
             pollInterval = 5,
-            restTimeout = 60,
+            timeout = 60,
             fetchConcluded = false,
             frontendUrl = "http://localhost:3000"
         )
@@ -138,7 +138,7 @@ class DosScannerTest : StringSpec({
             val jobId = response?.state?.jobId
 
             val resultsJson = json.encodeToString(response?.results)
-            val readyResponse = json.decodeFromString<DosService.ScanResultsResponseBody>(
+            val readyResponse = json.decodeFromString<ScanResultsResponseBody>(
                 getResourceAsString("/ready.json")
             )
             val expectedJson = json.encodeToString(readyResponse.results)
@@ -149,7 +149,7 @@ class DosScannerTest : StringSpec({
         }
     }
 
-    "runBackendScan() with failing presigned URL retrieval should abort and log an issue" {
+    "runBackendScan() with failing pre-signed URL retrieval should abort and log an issue" {
         server.stubFor(
             post(urlEqualTo("/api/upload-url"))
                 .willReturn(
@@ -157,8 +157,8 @@ class DosScannerTest : StringSpec({
                         .withStatus(400)
                 )
         )
-        val dosDir = createOrtTempDir()
-        val tmpDir = "/tmp/"
+        val dosDir = tempdir()
+        val tmpDir = tempdir()
         val thisScanStartTime = Instant.now()
         val issues = mutableListOf<Issue>()
         val pkg = Package.EMPTY.copy(

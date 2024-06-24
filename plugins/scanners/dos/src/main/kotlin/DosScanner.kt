@@ -20,6 +20,7 @@
 package org.ossreviewtoolkit.plugins.scanners.dos
 
 import java.io.File
+import java.time.Duration
 import java.time.Instant
 
 import kotlinx.coroutines.delay
@@ -29,6 +30,8 @@ import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.clients.dos.DosClient
 import org.ossreviewtoolkit.clients.dos.DosService
+import org.ossreviewtoolkit.clients.dos.ScanResultsResponseBody
+import org.ossreviewtoolkit.downloader.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
@@ -43,11 +46,11 @@ import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.scanner.ScannerWrapperFactory
 import org.ossreviewtoolkit.scanner.provenance.DefaultProvenanceDownloader
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
-import org.ossreviewtoolkit.scanner.utils.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.utils.common.Options
 import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.packZip
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 
 /**
  * DOS scanner is the ORT implementation of a ScanCode-based backend scanner, and it is a part of
@@ -70,14 +73,15 @@ class DosScanner internal constructor(
     // Later on, use DOS API to return API's version and use it here
     override val version = "1.0"
 
-    private val service = DosService.create(config.serverUrl, config.serverToken, config.restTimeout)
+    private val service = DosService.create(config.url, config.token, config.timeout?.let { Duration.ofSeconds(it) })
     var repository = DosClient(service)
     private val totalScanStartTime = Instant.now()
 
     override fun scanPackage(nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
         val startTime = Instant.now()
 
-        val tmpDir = "/tmp/"
+        // TODO: Delete this again.
+        val tmpDir = createOrtTempDir()
         val issues = mutableListOf<Issue>()
 
         val scanResults = runBlocking {
@@ -160,48 +164,48 @@ class DosScanner internal constructor(
     internal suspend fun runBackendScan(
         purls: List<String>,
         dosDir: File,
-        tmpDir: String,
+        tmpDir: File,
         thisScanStartTime: Instant,
         issues: MutableList<Issue>
-    ): DosService.ScanResultsResponseBody? {
+    ): ScanResultsResponseBody? {
         logger.info { "Initiating a backend scan" }
 
         // Zip the packet to scan and do local cleanup
         val zipName = dosDir.name + ".zip"
-        val targetZipFile = File("$tmpDir$zipName")
+        val targetZipFile = tmpDir.resolve(zipName)
         dosDir.packZip(targetZipFile)
         dosDir.safeDeleteRecursively() // ORT temp directory not needed anymore
 
         // Request presigned URL from DOS API
-        val presignedUrl = repository.getPresignedUrl(zipName)
+        val presignedUrl = repository.getUploadUrl(zipName)
         if (presignedUrl == null) {
             issues += createAndLogIssue(name, "Could not get a presigned URL for this package")
             targetZipFile.delete() // local cleanup before returning
-            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
+            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
         }
 
         // Transfer the zipped packet to S3 Object Storage and do local cleanup
-        val uploadSuccessful = repository.uploadFile(presignedUrl, tmpDir + zipName)
+        val uploadSuccessful = repository.uploadFile(targetZipFile, presignedUrl)
         if (!uploadSuccessful) {
             issues += createAndLogIssue(name, "Could not upload the packet to S3")
             targetZipFile.delete() // local cleanup before returning
-            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
+            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
         }
         targetZipFile.delete() // make sure the zipped packet is always deleted locally
 
         // Send the scan job to DOS API to start the backend scanning and do local cleanup
-        val jobResponse = repository.postScanJob(zipName, purls)
+        val jobResponse = repository.addScanJob(zipName, purls)
         val id = jobResponse?.scannerJobId
 
         if (jobResponse != null) {
             logger.info { "New scan request: Packages = ${purls.joinToString()}, Zip file = $zipName" }
             if (jobResponse.message == "Adding job to queue was unsuccessful") {
                 issues += createAndLogIssue(name, "DOS API: 'unsuccessful' response to the scan job request")
-                return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
+                return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
             }
         } else {
             issues += createAndLogIssue(name, "Could not create a new scan job at DOS API")
-            return DosService.ScanResultsResponseBody(DosService.ScanResultsResponseBody.State("failed"))
+            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
         }
 
         return id?.let {
@@ -218,9 +222,9 @@ class DosScanner internal constructor(
         logMessagePrefix: String,
         thisScanStartTime: Instant,
         issues: MutableList<Issue>
-    ): DosService.ScanResultsResponseBody? {
+    ): ScanResultsResponseBody? {
         while (true) {
-            val jobState = repository.getJobState(jobId)
+            val jobState = repository.getScanJobState(jobId)
             if (jobState != null) {
                 logger.info {
                     "$logMessagePrefix: ${elapsedTime(thisScanStartTime)}/${elapsedTime(totalScanStartTime)}, " +
