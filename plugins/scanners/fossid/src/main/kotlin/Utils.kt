@@ -38,23 +38,27 @@ private val EXTENSION_REGEX = "\\*\\.(?<extension>\\w+)".toRegex()
 private val FILE_REGEX = "(?<file>[^/]+)".toRegex()
 
 /**
- * Convert the ORT [path excludes][Excludes.paths] in [excludes] to FossID [IgnoreRule]s. If an error is encountered
- * during the mapping, an issue is added to [issues].
+ * Return the ORT [path excludes][Excludes.paths] in [excludes] converted to FossID [IgnoreRule]s and any errors that
+ * occurred during the conversion.
  */
-internal fun convertRules(excludes: Excludes, issues: MutableList<Issue>): List<IgnoreRule> {
-    return excludes.paths.mapNotNull { pathExclude ->
+internal fun convertRules(excludes: Excludes): Pair<List<IgnoreRule>, List<Issue>> {
+    val issues = mutableListOf<Issue>()
+
+    val ignoreRules = excludes.paths.mapNotNull { pathExclude ->
         pathExclude.mapToRule().alsoIfNull {
+            val message = "Path exclude '${pathExclude.pattern}' cannot be converted to an ignore rule."
+
             issues += Issue(
                 source = "FossID.convertRules",
-                message = "Path exclude '${pathExclude.pattern}' cannot be converted to an ignore rule.",
+                message = message,
                 severity = Severity.HINT
             )
 
-            logger.warn {
-                "Path exclude  '${pathExclude.pattern}' cannot be converted to an ignore rule."
-            }
+            logger.warn { message }
         }
     }
+
+    return ignoreRules to issues
 }
 
 @Suppress("UnsafeCallOnNullableType")
@@ -84,20 +88,22 @@ private fun PathExclude.mapToRule(): IgnoreRule? {
 }
 
 /**
- * Check if some elements of [rulesToTest] are legacy rules i.e. are not present in a reference list (current object).
- * Create an issue on [issues] for each legacy rule and return a list of the latter.
+ * Filter [IgnoreRule]s which are not contained in the [referenceRules]. These are legacy rules because they were not
+ * created from the [Excludes] defined in the repository configuration. Also create an [Issue] for each legacy rule.
  */
-internal fun List<IgnoreRule>.filterLegacyRules(
-    rulesToTest: List<IgnoreRule>,
-    issues: MutableList<Issue>
-): List<IgnoreRule> =
-    rulesToTest.filterNot { ruleToTest ->
-        any { it.value == ruleToTest.value && it.type == ruleToTest.type }
-    }.onEach {
-        issues += Issue(
+internal fun List<IgnoreRule>.filterLegacyRules(referenceRules: List<IgnoreRule>): Pair<List<IgnoreRule>, List<Issue>> {
+    val legacyRules = filterNot { rule ->
+        referenceRules.any { it.value == rule.value && it.type == rule.type }
+    }
+
+    val issues = legacyRules.map {
+        Issue(
             source = "FossID.compare",
             message = "Rule '${it.value}' with type '${it.type}' is not present in the .ort.yml path excludes. " +
                 "Add it to the .ort.yml file or remove it from the FossID scan.",
             severity = Severity.HINT
         )
     }
+
+    return legacyRules to issues
+}
