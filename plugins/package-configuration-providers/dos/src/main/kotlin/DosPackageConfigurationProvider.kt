@@ -65,8 +65,8 @@ class DosPackageConfigurationProviderFactory :
     override fun parseConfig(options: Options, secrets: Options) =
         DosPackageConfigurationProviderConfig(
             url = options.getValue("url"),
-            timeout = options["timeout"]?.toLongOrNull(),
-            token = secrets.getValue("token")
+            token = secrets.getValue("token"),
+            timeout = options["timeout"]?.toLongOrNull()
         )
 }
 
@@ -74,12 +74,7 @@ class DosPackageConfigurationProviderFactory :
  * A [PackageConfigurationProvider] that loads [PackageConfiguration]s from a Double Open Server instance.
  */
 class DosPackageConfigurationProvider(config: DosPackageConfigurationProviderConfig) : PackageConfigurationProvider {
-    private val service = DosService.create(
-        config.url,
-        config.token,
-        config.timeout?.let { Duration.ofSeconds(it) }
-    )
-
+    private val service = DosService.create(config.url, config.token, config.timeout?.let { Duration.ofSeconds(it) })
     private val client = DosClient(service)
 
     override fun getPackageConfigurations(packageId: Identifier, provenance: Provenance): List<PackageConfiguration> {
