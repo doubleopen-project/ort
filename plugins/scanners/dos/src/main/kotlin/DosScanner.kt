@@ -23,6 +23,9 @@ import java.io.File
 import java.time.Duration
 import java.time.Instant
 
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toKotlinDuration
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 
@@ -33,12 +36,17 @@ import org.ossreviewtoolkit.clients.dos.DosService
 import org.ossreviewtoolkit.clients.dos.ScanResultsResponseBody
 import org.ossreviewtoolkit.downloader.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.model.Issue
+import org.ossreviewtoolkit.model.Package
+import org.ossreviewtoolkit.model.Provenance
+import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.utils.associateLicensesWithExceptions
+import org.ossreviewtoolkit.model.utils.toPurl
+import org.ossreviewtoolkit.model.utils.toPurlExtras
 import org.ossreviewtoolkit.scanner.PackageScannerWrapper
 import org.ossreviewtoolkit.scanner.ScanContext
 import org.ossreviewtoolkit.scanner.ScannerMatcher
@@ -53,12 +61,15 @@ import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.ort.createOrtTempDir
 
 /**
- * DOS scanner is the ORT implementation of a ScanCode-based backend scanner, and it is a part of
- * DoubleOpen project: https://github.com/doubleopen-project/dos
+ * The DOS scanner wrapper is a client for the scanner API implemented as part of the Double Open Server project at
+ * https://github.com/doubleopen-project/dos. The server runs ScanCode in the backend and stores / reuses scan results
+ * on a per-file basis and thus uses its own scan storage.
  */
 class DosScanner internal constructor(
     override val name: String,
-    private val config: DosScannerConfig, override val readFromStorage: Boolean, override val writeToStorage: Boolean
+    private val config: DosScannerConfig,
+    override val readFromStorage: Boolean,
+    override val writeToStorage: Boolean
 ) : PackageScannerWrapper {
     class Factory : ScannerWrapperFactory<DosScannerConfig>("DOS") {
         override fun create(config: DosScannerConfig, wrapperConfig: ScannerWrapperConfig) =
@@ -70,18 +81,15 @@ class DosScanner internal constructor(
     override val matcher: ScannerMatcher? = null
     override val configuration = ""
 
-    // Later on, use DOS API to return API's version and use it here
-    override val version = "1.0"
+    // TODO: Introduce a DOS version and expose it through the API to use it here.
+    override val version = "1.0.0"
 
     private val service = DosService.create(config.url, config.token, config.timeout?.let { Duration.ofSeconds(it) })
-    var repository = DosClient(service)
-    private val totalScanStartTime = Instant.now()
+    internal val client = DosClient(service)
 
     override fun scanPackage(nestedProvenance: NestedProvenance?, context: ScanContext): ScanResult {
         val startTime = Instant.now()
 
-        // TODO: Delete this again.
-        val tmpDir = createOrtTempDir()
         val issues = mutableListOf<Issue>()
 
         val scanResults = runBlocking {
@@ -100,11 +108,11 @@ class DosScanner internal constructor(
 
             // Ask for scan results from DOS API
             val existingScanResults = runCatching {
-                repository.getScanResults(purls, config.fetchConcluded)
+                client.getScanResults(purls, config.fetchConcluded)
             }.onFailure {
                 issues += createAndLogIssue(name, it.collectMessages())
             }.onSuccess {
-                if (it == null) issues += createAndLogIssue(name, "Could not request scan results from DOS API")
+                if (it == null) issues += createAndLogIssue(name, "Missing scan results response body.")
             }.getOrNull()
 
             when (existingScanResults?.state?.status) {
@@ -113,9 +121,8 @@ class DosScanner internal constructor(
 
                     runCatching {
                         downloader.download(provenance)
-                    }.mapCatching { dosDir ->
-                        logger.info { "Package downloaded to: $dosDir" }
-                        runBackendScan(purls, dosDir, tmpDir, startTime, issues)
+                    }.mapCatching { sourceDir ->
+                        runBackendScan(purls, sourceDir, startTime, issues)
                     }.onFailure {
                         issues += createAndLogIssue(name, it.collectMessages())
                     }.getOrNull()
@@ -130,15 +137,6 @@ class DosScanner internal constructor(
                 }
 
                 "ready" -> existingScanResults
-
-                "failed" -> {
-                    issues += createAndLogIssue(
-                        name,
-                        "Something went wrong at DOS backend, exiting scan of this package"
-                    )
-
-                    null
-                }
 
                 else -> null
             }
@@ -163,88 +161,87 @@ class DosScanner internal constructor(
 
     internal suspend fun runBackendScan(
         purls: List<String>,
-        dosDir: File,
-        tmpDir: File,
-        thisScanStartTime: Instant,
+        sourceDir: File,
+        startTime: Instant,
         issues: MutableList<Issue>
     ): ScanResultsResponseBody? {
-        logger.info { "Initiating a backend scan" }
+        logger.info { "Initiating a backend scan for $purls." }
 
-        // Zip the packet to scan and do local cleanup
-        val zipName = dosDir.name + ".zip"
-        val targetZipFile = tmpDir.resolve(zipName)
-        dosDir.packZip(targetZipFile)
-        dosDir.safeDeleteRecursively() // ORT temp directory not needed anymore
+        val tmpDir = createOrtTempDir()
+        val zipName = "${sourceDir.name}.zip"
+        val zipFile = tmpDir.resolve(zipName)
 
-        // Request presigned URL from DOS API
-        val presignedUrl = repository.getUploadUrl(zipName)
-        if (presignedUrl == null) {
-            issues += createAndLogIssue(name, "Could not get a presigned URL for this package")
-            targetZipFile.delete() // local cleanup before returning
-            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
+        sourceDir.packZip(zipFile)
+        sourceDir.safeDeleteRecursively(force = true)
+
+        val uploadUrl = client.getUploadUrl(zipName)
+        if (uploadUrl == null) {
+            issues += createAndLogIssue(name, "Unable to get an upload URL for '$zipName'.")
+            zipFile.delete()
+            return null
         }
 
-        // Transfer the zipped packet to S3 Object Storage and do local cleanup
-        val uploadSuccessful = repository.uploadFile(targetZipFile, presignedUrl)
+        val uploadSuccessful = client.uploadFile(zipFile, uploadUrl).also { zipFile.delete() }
         if (!uploadSuccessful) {
-            issues += createAndLogIssue(name, "Could not upload the packet to S3")
-            targetZipFile.delete() // local cleanup before returning
-            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
+            issues += createAndLogIssue(name, "Uploading '$zipFile' to $uploadUrl failed.")
+            return null
         }
-        targetZipFile.delete() // make sure the zipped packet is always deleted locally
 
-        // Send the scan job to DOS API to start the backend scanning and do local cleanup
-        val jobResponse = repository.addScanJob(zipName, purls)
+        val jobResponse = client.addScanJob(zipName, purls)
         val id = jobResponse?.scannerJobId
 
-        if (jobResponse != null) {
-            logger.info { "New scan request: Packages = ${purls.joinToString()}, Zip file = $zipName" }
-            if (jobResponse.message == "Adding job to queue was unsuccessful") {
-                issues += createAndLogIssue(name, "DOS API: 'unsuccessful' response to the scan job request")
-                return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
-            }
-        } else {
-            issues += createAndLogIssue(name, "Could not create a new scan job at DOS API")
-            return ScanResultsResponseBody(ScanResultsResponseBody.State("failed"))
+        if (id == null) {
+            issues += createAndLogIssue(name, "Failed to add scan job for '$zipName' and $purls.")
+            return null
         }
 
-        return id?.let {
-            // In case of multiple PURLs, they all point to packages with the same provenance. So if one package scan is
-            // complete, all package scans are complete, which is why it is enough to arbitrarily pool for the first
-            // package here.
-            pollForCompletion(purls.first(), it, "New scan", thisScanStartTime, issues)
-        }
+        // In case of multiple PURLs, they all point to packages with the same provenance. So if one package scan is
+        // complete, all package scans are complete, which is why it is enough to arbitrarily pool for the first
+        // package here.
+        return pollForCompletion(purls.first(), id, "New scan", startTime, issues)
     }
 
     private suspend fun pollForCompletion(
         purl: String,
         jobId: String,
         logMessagePrefix: String,
-        thisScanStartTime: Instant,
+        startTime: Instant,
         issues: MutableList<Issue>
     ): ScanResultsResponseBody? {
         while (true) {
-            val jobState = repository.getScanJobState(jobId)
-            if (jobState != null) {
-                logger.info {
-                    "$logMessagePrefix: ${elapsedTime(thisScanStartTime)}/${elapsedTime(totalScanStartTime)}, " +
-                        "state = ${jobState.state.status}, " +
-                        "message = ${jobState.state.message}"
-                }
+            val jobState = client.getScanJobState(jobId) ?: return null
+
+            logger.info {
+                val duration = Duration.between(startTime, Instant.now()).toKotlinDuration()
+                "$logMessagePrefix running for $duration, currently at ${jobState.state}."
             }
-            if (jobState != null) {
-                when (jobState.state.status) {
-                    "completed" -> {
-                        logger.info { "Scan completed" }
-                        return repository.getScanResults(listOf(purl), config.fetchConcluded)
-                    }
-                    "failed" -> {
-                        issues += createAndLogIssue(name, "Scan failed in DOS API")
-                        return null
-                    }
-                    else -> delay(config.pollInterval * 1000L)
+
+            when (jobState.state.status) {
+                "completed" -> {
+                    logger.info { "Scan completed" }
+                    return client.getScanResults(listOf(purl), config.fetchConcluded)
                 }
+
+                "failed" -> {
+                    issues += createAndLogIssue(name, "Scan failed in DOS API")
+                    return null
+                }
+
+                else -> delay(config.pollInterval.seconds)
             }
         }
+    }
+}
+
+private fun Collection<Package>.getDosPurls(provenance: Provenance = UnknownProvenance): List<String> {
+    val extras = provenance.toPurlExtras()
+
+    return when (provenance) {
+        is RepositoryProvenance -> {
+            // Maintain the VCS path to get the "bookmarking" right for the file tree in the package configuration UI.
+            map { it.id.toPurl(extras.qualifiers, it.vcsProcessed.path) }
+        }
+
+        else -> map { it.id.toPurl(extras) }
     }
 }

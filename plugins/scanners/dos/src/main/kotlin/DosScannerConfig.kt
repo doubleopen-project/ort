@@ -35,7 +35,7 @@ data class DosScannerConfig(
     val timeout: Long?,
 
     /** Interval (in seconds) to use for polling scanjob status from DOS API. **/
-    val pollInterval: Int,
+    val pollInterval: Long,
 
     /** Use license conclusions as detected licenses when they exist? **/
     val fetchConcluded: Boolean,
@@ -45,14 +45,14 @@ data class DosScannerConfig(
 ) {
     companion object {
         private const val DEFAULT_FRONT_END_URL = "http://localhost:3000"
-        private const val DEFAULT_POLLING_INTERVAL = 5
+        private const val DEFAULT_POLLING_INTERVAL = 5L
 
         fun create(options: Options, secrets: Options): DosScannerConfig {
             return DosScannerConfig(
                 url = options.getValue("url"),
                 token = secrets.getValue("token"),
                 timeout = options["timeout"]?.toLongOrNull(),
-                pollInterval = options["pollInterval"]?.toIntOrNull() ?: DEFAULT_POLLING_INTERVAL,
+                pollInterval = options["pollInterval"]?.toLongOrNull() ?: DEFAULT_POLLING_INTERVAL,
                 fetchConcluded = options["fetchConcluded"].toBoolean(),
                 frontendUrl = options["frontendUrl"] ?: DEFAULT_FRONT_END_URL
             )

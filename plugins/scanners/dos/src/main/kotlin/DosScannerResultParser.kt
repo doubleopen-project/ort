@@ -17,10 +17,6 @@
  * License-Filename: LICENSE
  */
 
-/**
- * This file implements the needed functions to interpret the scan results from DOS API
- * to a format suited for ORT.
- */
 package org.ossreviewtoolkit.plugins.scanners.dos
 
 import java.time.Instant
@@ -42,17 +38,18 @@ import org.ossreviewtoolkit.utils.spdx.toSpdx
 
 internal fun generateSummary(startTime: Instant, endTime: Instant, result: JsonObject): ScanSummary {
     val issues = mutableListOf<Issue>()
+
     val licenseFindings = result.getLicenseFindings(issues)
     val copyrightFindings = result.getCopyrightFindings(issues)
+
     result.getIssues(issues)
 
     return ScanSummary(
         startTime,
         endTime,
-        licenseFindings,
-        copyrightFindings,
-        emptySet(),
-        issues
+        licenseFindings = licenseFindings,
+        copyrightFindings = copyrightFindings,
+        issues = issues
     )
 }
 
@@ -63,21 +60,22 @@ private fun JsonObject.getLicenseFindings(issues: MutableList<Issue>): Set<Licen
         val licenseNode = it.jsonObject
 
         val license = licenseNode.getValue("license").jsonPrimitive.content
-        val location = licenseNode.getValue("location").jsonObject
-
-        val path = location.getValue("path").jsonPrimitive.content
-        val startLine = location.getValue("start_line").jsonPrimitive.int
-        val endLine = location.getValue("end_line").jsonPrimitive.int
         val score = licenseNode.getValue("score").jsonPrimitive.float
 
         runCatching {
             license.toSpdx()
-        }.map { licenseExpression ->
-            LicenseFinding(licenseExpression, TextLocation(path, startLine, endLine), score)
         }.onFailure { exception ->
             issues += Issue(
                 source = "DOSResultParser",
                 message = "Cannot parse '$license' as an SPDX expression: ${exception.message}"
+            )
+        }.mapCatching { licenseExpression ->
+            val location = licenseNode.getTextLocation()
+            LicenseFinding(licenseExpression, location, score)
+        }.onFailure { exception ->
+            issues += Issue(
+                source = "DOSResultParser",
+                message = "Failed to create a text location for $licenseNode: ${exception.message}"
             )
         }.getOrNull()
     }
@@ -90,24 +88,27 @@ private fun JsonObject.getCopyrightFindings(issues: MutableList<Issue>): Set<Cop
         val copyrightNode = it.jsonObject
 
         val statement = copyrightNode.getValue("statement").jsonPrimitive.content
-        val location = copyrightNode.getValue("location").jsonObject
-
-        val path = location.getValue("path").jsonPrimitive.content
-        val startLine = location.getValue("start_line").jsonPrimitive.int
-        val endLine = location.getValue("end_line").jsonPrimitive.int
 
         runCatching {
-            TextLocation(path, startLine, endLine)
-        }.map { textLocation ->
-            CopyrightFinding(statement, textLocation)
+            val location = copyrightNode.getTextLocation()
+            CopyrightFinding(statement, location)
         }.onFailure { exception ->
             issues += Issue(
                 source = "DOSResultParser",
-                message = "Cannot create a text location from path '$path', start line $startLine and end line " +
-                    "$endLine: ${exception.message}"
+                message = "Failed to create a text location for $copyrightNode: ${exception.message}"
             )
         }.getOrNull()
     }
+}
+
+private fun JsonObject.getTextLocation(): TextLocation {
+    val location = getValue("location").jsonObject
+
+    val path = location.getValue("path").jsonPrimitive.content
+    val startLine = location.getValue("start_line").jsonPrimitive.int
+    val endLine = location.getValue("end_line").jsonPrimitive.int
+
+    return TextLocation(path, startLine, endLine)
 }
 
 private fun JsonObject.getIssues(issues: MutableList<Issue>) {

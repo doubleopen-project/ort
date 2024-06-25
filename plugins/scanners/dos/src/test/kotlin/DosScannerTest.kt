@@ -28,14 +28,18 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.beNull
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 
 import java.time.Instant
 
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
+import org.ossreviewtoolkit.clients.dos.JSON
 import org.ossreviewtoolkit.clients.dos.ScanResultsResponseBody
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.Issue
@@ -52,7 +56,6 @@ import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 
 class DosScannerTest : StringSpec({
     lateinit var scanner: DosScanner
-    val json = Json { prettyPrint = true }
 
     val server = WireMockServer(
         WireMockConfiguration.options().dynamicPort().notifier(ConsoleNotifier(false))
@@ -62,14 +65,16 @@ class DosScannerTest : StringSpec({
 
     beforeTest {
         server.start()
+
         val config = DosScannerConfig(
             url = "http://localhost:${server.port()}/api/",
             token = "",
-            pollInterval = 5,
-            timeout = 60,
+            timeout = 60L,
+            pollInterval = 5L,
             fetchConcluded = false,
             frontendUrl = "http://localhost:3000"
         )
+
         scanner = DosScanner.Factory().create(config, ScannerWrapperConfig.EMPTY)
     }
 
@@ -85,9 +90,8 @@ class DosScannerTest : StringSpec({
                         .withStatus(400)
                 )
         )
-        runBlocking {
-            scanner.repository.getScanResults(emptyList(), false) shouldBe null
-        }
+
+        scanner.client.getScanResults(emptyList(), false) shouldBe null
     }
 
     "getScanResults() should return 'no-results' when no results in db" {
@@ -99,10 +103,10 @@ class DosScannerTest : StringSpec({
                         .withBody(getResourceAsString("/no-results.json"))
                 )
         )
-        runBlocking {
-            val status = scanner.repository.getScanResults(listOf("purl"), false)?.state?.status
-            status shouldBe "no-results"
-        }
+
+        val status = scanner.client.getScanResults(listOf("purl"), false)?.state?.status
+
+        status shouldBe "no-results"
     }
 
     "getScanResults() should return 'pending' when scan ongoing" {
@@ -114,13 +118,11 @@ class DosScannerTest : StringSpec({
                         .withBody(getResourceAsString("/pending.json"))
                 )
         )
-        runBlocking {
-            val response = scanner.repository.getScanResults(listOf("purl"), false)
-            val status = response?.state?.status
-            val jobId = response?.state?.jobId
-            status shouldBe "pending"
-            jobId shouldBe "dj34eh4h65"
-        }
+
+        val response = scanner.client.getScanResults(listOf("purl"), false)
+
+        response?.state?.status shouldBe "pending"
+        response?.state?.jobId shouldBe "dj34eh4h65"
     }
 
     "getScanResults() should return 'ready' plus the results when results in db" {
@@ -132,24 +134,20 @@ class DosScannerTest : StringSpec({
                         .withBody(getResourceAsString("/ready.json"))
                 )
         )
-        runBlocking {
-            val response = scanner.repository.getScanResults(listOf("purl"), false)
-            val status = response?.state?.status
-            val jobId = response?.state?.jobId
 
-            val resultsJson = json.encodeToString(response?.results)
-            val readyResponse = json.decodeFromString<ScanResultsResponseBody>(
-                getResourceAsString("/ready.json")
-            )
-            val expectedJson = json.encodeToString(readyResponse.results)
+        val response = scanner.client.getScanResults(listOf("purl"), false)
 
-            status shouldBe "ready"
-            jobId shouldBe null
-            resultsJson shouldBe expectedJson
+        val actualJson = JSON.encodeToString(response?.results)
+        val expectedJson = JSON.decodeFromString<ScanResultsResponseBody>(getResourceAsString("/ready.json")).let {
+            JSON.encodeToString(it.results)
         }
+
+        response?.state?.status shouldBe "ready"
+        response?.state?.jobId shouldBe null
+        actualJson shouldBe expectedJson
     }
 
-    "runBackendScan() with failing pre-signed URL retrieval should abort and log an issue" {
+    "runBackendScan() with failing upload URL retrieval should abort and log an issue" {
         server.stubFor(
             post(urlEqualTo("/api/upload-url"))
                 .willReturn(
@@ -157,28 +155,26 @@ class DosScannerTest : StringSpec({
                         .withStatus(400)
                 )
         )
-        val dosDir = tempdir()
-        val tmpDir = tempdir()
-        val thisScanStartTime = Instant.now()
-        val issues = mutableListOf<Issue>()
+
         val pkg = Package.EMPTY.copy(
             id = Identifier("Maven:org.apache.commons:commons-lang3:3.9"),
             binaryArtifact = RemoteArtifact.EMPTY.copy(url = "https://www.apache.org/dist/commons/commons-lang3/3.9/")
         )
-        val result = runBlocking {
-            scanner.runBackendScan(
-                listOf(pkg.purl),
-                dosDir,
-                tmpDir,
-                thisScanStartTime,
-                issues
-            )
-        }
-        if (result != null) {
-            result.state.status shouldBe "failed"
-            issues.size shouldBe 1
-            issues[0].message shouldBe "Could not get a presigned URL for this package"
-            issues[0].severity shouldBe Severity.ERROR
+        val issues = mutableListOf<Issue>()
+
+        val result = scanner.runBackendScan(
+            purls = listOf(pkg.purl),
+            sourceDir = tempdir(),
+            startTime = Instant.now(),
+            issues = issues
+        )
+
+        result should beNull()
+        issues shouldHaveSize 1
+
+        with(issues.first()) {
+            message shouldStartWith "Unable to get an upload URL for "
+            severity shouldBe Severity.ERROR
         }
     }
 
@@ -191,6 +187,7 @@ class DosScannerTest : StringSpec({
                         .withBody(getResourceAsString("/ready.json"))
                 )
         )
+
         val pkg = Package.EMPTY.copy(
             purl = "pkg:npm/mime-db@1.33.0",
             vcsProcessed = VcsInfo(
@@ -216,9 +213,11 @@ class DosScannerTest : StringSpec({
             )
         )
 
-        scanResult.summary.licenseFindings.size shouldBe 3
-        scanResult.summary.copyrightFindings.size shouldBe 2
-        scanResult.summary.issues.size shouldBe 0
+        with(scanResult.summary) {
+            licenseFindings shouldHaveSize 3
+            copyrightFindings shouldHaveSize 2
+            issues should beEmpty()
+        }
     }
 
     "scanPackage() should abort and log an issue when fetching presigned URL fails" {
@@ -230,6 +229,7 @@ class DosScannerTest : StringSpec({
                         .withBody(getResourceAsString("/no-results.json"))
                 )
         )
+
         server.stubFor(
             post(urlEqualTo("/api/upload-url"))
                 .willReturn(
@@ -237,6 +237,7 @@ class DosScannerTest : StringSpec({
                         .withStatus(400)
                 )
         )
+
         val pkg = Package.EMPTY.copy(
             purl = "pkg:npm/mime-db@1.33.0",
             vcsProcessed = VcsInfo(
@@ -262,10 +263,16 @@ class DosScannerTest : StringSpec({
             )
         )
 
-        scanResult.summary.licenseFindings.size shouldBe 0
-        scanResult.summary.copyrightFindings.size shouldBe 0
-        scanResult.summary.issues.size shouldBe 1
-        scanResult.summary.issues[0].message shouldBe "Could not get a presigned URL for this package"
-        scanResult.summary.issues[0].severity shouldBe Severity.ERROR
+        with(scanResult.summary) {
+            licenseFindings should beEmpty()
+            copyrightFindings should beEmpty()
+
+            issues shouldHaveSize 1
+
+            with(issues.first()) {
+                message shouldStartWith "Unable to get an upload URL for "
+                severity shouldBe Severity.ERROR
+            }
+        }
     }
 })
