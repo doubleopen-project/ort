@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2024 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,20 @@
 plugins {
     // Apply precompiled plugins.
     id("ort-library-conventions")
+
+    // Apply third-party plugins.
     alias(libs.plugins.kotlinSerialization)
 }
 
 dependencies {
     api(projects.model)
     api(projects.scanner)
+
+    implementation(projects.clients.dosClient)
+    implementation(projects.downloader)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.ortUtils)
+    implementation(projects.utils.spdxUtils)
 
     implementation(libs.bundles.kotlinxSerialization)
     implementation(libs.kotlinx.coroutines)
